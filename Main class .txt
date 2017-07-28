@@ -1,0 +1,1316 @@
+/*------------------------------------------------------------------------
+    File        : fpLocation.cls
+    Purpose     :
+    Syntax      :
+        
+    Description : Parent form which involkes tabbed form
+    Author(s)   : ENL
+    Created     : 26th Jul 2017
+    Notes       : Adapted from ## w-cal.w ##
+  ----------------------------------------------------------------------*/
+ 
+USING Progress.Lang.*.
+USING Progress.Windows.Form.
+USING Infragistics.Win.UltraWinDock.*.
+ 
+ROUTINE-LEVEL ON ERROR UNDO, THROW.
+ 
+CLASS fpLocation INHERITS IParentTabForm:
+    
+    DEFINE PRIVATE VARIABLE m_TabbedParentFormTemplateUnpinnedTabAreaTop    AS Infragistics.Win.UltraWinDock.UnpinnedTabArea  NO-UNDO.
+    DEFINE PRIVATE VARIABLE m_TabbedParentFormTemplateUnpinnedTabAreaRight  AS Infragistics.Win.UltraWinDock.UnpinnedTabArea  NO-UNDO.
+    DEFINE PRIVATE VARIABLE m_TabbedParentFormTemplateUnpinnedTabAreaLeft   AS Infragistics.Win.UltraWinDock.UnpinnedTabArea  NO-UNDO.
+    DEFINE PRIVATE VARIABLE m_TabbedParentFormTemplateUnpinnedTabAreaBottom AS Infragistics.Win.UltraWinDock.UnpinnedTabArea  NO-UNDO.
+    DEFINE PRIVATE VARIABLE m_TabbedParentFormTemplateAutoHideControl       AS Infragistics.Win.UltraWinDock.AutoHideControl  NO-UNDO.
+    DEFINE PRIVATE VARIABLE components                                      AS System.ComponentModel.IContainer               NO-UNDO.
+    DEFINE PRIVATE VARIABLE ultraDockManager1                               AS Infragistics.Win.UltraWinDock.UltraDockManager NO-UNDO.
+ 
+    {ttSavedGrid.i}
+    {ttSystab.i}
+    {dsSystab.i}
+    {ttSystemMsg.i}
+    {dsSystemMsg.i}
+ 
+    DEFINE PUBLIC  VARIABLE oGridForm                AS ftLocationGrid            NO-UNDO.
+    DEFINE PUBLIC  VARIABLE oTabForm1                AS ftLocation                NO-UNDO.
+    DEFINE PRIVATE VARIABLE oDockableControlPaneTab  AS DockableControlPane       NO-UNDO EXTENT 1.
+ 
+   
+    DEFINE PRIVATE VARIABLE cTabDefaultForms AS CHARACTER NO-UNDO.
+ 
+    DEFINE PRIVATE VARIABLE oBindingSource           AS Progress.Data.BindingSource NO-UNDO.
+    DEFINE PRIVATE VARIABLE oBindingSourceStock      AS Progress.Data.BindingSource NO-UNDO.
+    DEFINE PRIVATE VARIABLE oDockableControlPaneGrid AS DockableControlPane         NO-UNDO.
+    DEFINE PRIVATE VARIABLE oDockableGroupPane       AS DockableGroupPane           NO-UNDO.
+    DEFINE PRIVATE VARIABLE oDockAreaPaneTop         AS DockAreaPane                NO-UNDO.
+    DEFINE PRIVATE VARIABLE oDockAreaPaneBottom      AS DockAreaPane                NO-UNDO.
+    DEFINE PRIVATE VARIABLE oDockAreaPaneLeft        AS DockAreaPane                NO-UNDO.
+    DEFINE PRIVATE VARIABLE oDockAreaPaneRight       AS DockAreaPane                NO-UNDO.
+    DEFINE PRIVATE VARIABLE oLastPane                AS DockableControlPane         NO-UNDO.
+    DEFINE PRIVATE VARIABLE oForeColor               AS System.Drawing.Color        NO-UNDO.
+ 
+    DEFINE PRIVATE VARIABLE iMenuID          AS INTEGER   NO-UNDO.
+    DEFINE PRIVATE VARIABLE cUpdateForm      AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE cLastPressed     AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE iParentHeight    AS INTEGER   NO-UNDO.
+    DEFINE PRIVATE VARIABLE iParentWidth     AS INTEGER   NO-UNDO.
+    DEFINE PRIVATE VARIABLE iPanelWidth      AS INTEGER   NO-UNDO INITIAL 668. /* Child form's width */
+    DEFINE PRIVATE VARIABLE iPanelTabHeight  AS INTEGER   NO-UNDO INITIAL 450.    /*320.  Child form's height */
+    DEFINE PRIVATE VARIABLE iPanelGridHeight AS INTEGER   NO-UNDO.
+ 
+    DEFINE PRIVATE VARIABLE oFormLayout      AS FormLayout    NO-UNDO.
+    DEFINE PRIVATE VARIABLE oMsgTable        AS MsgTable      NO-UNDO.
+    DEFINE PRIVATE VARIABLE ofSystemMsg      AS fSystemMsg    NO-UNDO.
+    DEFINE PRIVATE VARIABLE oSystabTable     AS SystabTable   NO-UNDO.
+    DEFINE PRIVATE VARIABLE oSyslabelTable   AS SyslabelTable NO-UNDO.
+    DEFINE PRIVATE VARIABLE ofProgressBar    AS fProgressBar  NO-UNDO.
+ 
+    DEFINE PRIVATE VARIABLE cMsg             AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE cStyle           AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE cTitle           AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE iCount           AS INTEGER   NO-UNDO.
+    DEFINE PRIVATE VARIABLE cGridName        AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE cTabsInEnglish   AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE cTabsTranslated  AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE cGridInEnglish   AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE cGridTranslated  AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE cDept            AS CHARACTER NO-UNDO.
+    DEFINE PRIVATE VARIABLE lTabsCustomised  AS LOGICAL   NO-UNDO.
+    DEFINE PRIVATE VARIABLE lDefaultTabsOK   AS LOGICAL   NO-UNDO.
+    DEFINE PRIVATE VARIABLE lFormClosing     AS LOGICAL   NO-UNDO.
+    DEFINE PRIVATE VARIABLE lUndockTab       AS LOGICAL   NO-UNDO.
+ 
+    DEFINE PRIVATE VARIABLE iGridFilterResultsCount AS INTEGER   NO-UNDO.
+    DEFINE PRIVATE VARIABLE cGridFilterResultsForm  AS CHARACTER NO-UNDO.
+ 
+    CONSTRUCTOR PUBLIC fpLocation ( INPUT ipMenuID AS INTEGER ):
+ 
+        SUPER().
+        InitializeComponent().
+ 
+        /* Get saved view */
+        FIND FIRST ttSavedGrid NO-ERROR.
+ 
+        /* Set form title */
+        THIS-OBJECT:Text = Statics:GetWindowTitle (INPUT Statics:cUser,
+                                                   INPUT Statics:cOffice,
+                                                   INPUT Statics:cDept,
+                                                   INPUT Statics:lAppserver,
+                                                   INPUT THIS-OBJECT:NAME,
+                                                   INPUT "").
+ 
+        /* Create class objects, set properties, etc. */
+        ASSIGN iMenuID      = ipMenuID
+               oFormLayout  = NEW FormLayout()
+               oMsgTable    = NEW MsgTable()
+               oSystabTable = NEW SystabTable().
+ 
+        /* Calculate size of tab dock areas depending on number of tabs when Tab text is visible or not */
+        /* Subtract 12 for single tab or add 8 for multiple tabs */
+        IF EXTENT(oDockableControlPaneTab) = 1 THEN
+            iPanelTabHeight = iPanelTabHeight - 12.
+        ELSE
+            iPanelTabHeight = iPanelTabHeight + 8.
+        iPanelGridHeight = THIS-OBJECT:Size:Height - (iPanelTabHeight + 4).
+ 
+        /* Set form layout */
+        oFormLayout:SetLayout(INPUT CAST(THIS-OBJECT, Progress.Windows.Form),
+                              THIS-OBJECT:Controls,
+                              INPUT-OUTPUT iPanelWidth,
+                              INPUT-OUTPUT iPanelGridHeight,
+                              INPUT-OUTPUT iPanelTabHeight).
+ 
+        Statics:HourglassCursor(YES). /* Change cursor */
+ 
+        /* Remember form's initial size */
+        ASSIGN iParentHeight = THIS-OBJECT:Height
+               iParentWidth  = THIS-OBJECT:Width.
+ 
+        /* Create tabs */
+        THIS-OBJECT:TabsCreate().
+ 
+        /* Force refresh of binding source so grid's AfterRowActivate event is triggered without user   */
+        /* changing its row so its current row is used to refresh child forms or customise tabs by dept */
+        oGridForm:RefreshBindingSource().
+ 
+        /* Customise forms on tabs if not done yet by RefreshTabbedForms when grid refreshed */
+        IF NOT lTabsCustomised THEN
+            THIS-OBJECT:TabsCustomise().
+ 
+        Statics:HourglassCursor(NO). /* Reset cursor */
+ 
+        CATCH e AS Progress.Lang.Error:
+           IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (Constructor)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+ 
+    END CONSTRUCTOR.
+ 
+    CONSTRUCTOR PUBLIC fpLocation ( INPUT ipMenuID AS INTEGER, INPUT TABLE ttSavedGrid ):
+ 
+        SUPER().
+        InitializeComponent().
+ 
+        /* Set form title */
+        THIS-OBJECT:Text = Statics:GetWindowTitle (INPUT Statics:cUser,
+                                                   INPUT Statics:cOffice,
+                                                   INPUT Statics:cDept,
+                                                   INPUT Statics:lAppserver,
+                                                   INPUT THIS-OBJECT:NAME,
+                                                   INPUT (IF AVAILABLE ttSavedGrid THEN ttSavedGrid.view-name ELSE "")).
+ 
+        /* Create class objects, set properties, etc. */
+        ASSIGN iMenuID      = ipMenuID
+               oFormLayout  = NEW FormLayout()
+               oMsgTable    = NEW MsgTable()
+               oSystabTable = NEW SystabTable().
+ 
+        /* Calculate size of tab dock areas depending on number of tabs when Tab text is visible or not */
+        /* Subtract 12 for single tab or add 8 for multiple tabs */
+        IF EXTENT(oDockableControlPaneTab) = 1 THEN
+            iPanelTabHeight = iPanelTabHeight - 12.
+        ELSE
+            iPanelTabHeight = iPanelTabHeight + 8.
+        iPanelGridHeight = THIS-OBJECT:Size:Height - (iPanelTabHeight + 4).
+ 
+        /* Set form layout */
+        oFormLayout:SetLayout(INPUT CAST(THIS-OBJECT, Progress.Windows.Form),
+                              THIS-OBJECT:Controls,
+                              INPUT-OUTPUT iPanelWidth,
+                              INPUT-OUTPUT iPanelGridHeight,
+                              INPUT-OUTPUT iPanelTabHeight).
+ 
+        Statics:HourglassCursor(YES). /* Change cursor */
+ 
+        /* Remember form's initial size */
+        ASSIGN iParentHeight = THIS-OBJECT:Height
+               iParentWidth  = THIS-OBJECT:Width.
+ 
+        /* Create tabs */
+        THIS-OBJECT:TabsCreate().
+ 
+        /* Force refresh of binding source so grid's AfterRowActivate event is triggered without user   */
+        /* changing its row so its current row is used to refresh child forms or customise tabs by dept */
+        oGridForm:RefreshBindingSource().
+ 
+        /* Customise forms on tabs if not done yet by RefreshTabbedForms when grid refreshed */
+        IF NOT lTabsCustomised THEN
+            THIS-OBJECT:TabsCustomise().
+ 
+        Statics:HourglassCursor(NO). /* Reset cursor */
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (Constructor)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+ 
+    END CONSTRUCTOR.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Delete NET object reference and clear memory resources for
+                     tabbed forms and class objects
+            Notes: Required as a tabbed form's destructor isn't always callled
+    ------------------------------------------------------------------------------*/
+    @VisualDesigner.
+    METHOD PRIVATE VOID fpLocation_FormClosed( INPUT sender AS System.Object, INPUT e AS System.Windows.Forms.FormClosedEventArgs ):
+        CleanUp().
+        RETURN.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Stop form closing if in update mode
+            Notes:
+    ------------------------------------------------------------------------------*/
+    @VisualDesigner.
+    METHOD PRIVATE VOID fpLocation_FormClosing( INPUT sender AS System.Object, INPUT e AS System.Windows.Forms.FormClosingEventArgs ):
+        IF lUpdateMode = YES THEN
+        DO:
+            /* "Close current transaction before leaving this window" */
+            oMsgTable:GetMessage("50000001", Statics:cLanguage, "", "", OUTPUT cMsg, OUTPUT cStyle, OUTPUT cTitle).
+            Statics:ShowMsg(cMsg, cTitle, "OK", cStyle).
+            e:Cancel = YES.
+            RETURN.
+        END.
+        ELSE
+            lFormClosing = YES.
+        RETURN.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Get and/or create child form for selected tab
+            Notes: 1. Each tab form's name must match a systab record, see
+                      oSystabTable:CheckDefaultTabs.
+                   2. Access must be PUBLIC or get .NET errors
+                INPUT
+                    1. ipTabText   = text  of selected tab
+                    2. ipTabForm   = name of form to show on selected tab
+                OUTPUT
+                    1. opChildForm = child form to put on selected tab
+    ------------------------------------------------------------------------------*/
+    METHOD PUBLIC VOID GetChildForm ( INPUT ipTabText    AS CHARACTER,
+                                      INPUT ipTabForm    AS CHARACTER,
+                                      OUTPUT opChildForm AS IChildTabForm):
+        CASE ipTabText:
+            WHEN "Details" THEN
+            DO:
+                IF NOT VALID-OBJECT(oTabForm1) THEN
+                    ASSIGN oTabForm1                 = NEW ftLocation(oBindingSource, THIS-OBJECT, cGridName)
+                           oTabForm1:Name            = ipTabText
+                           oTabForm1:TopLevel        = NO
+                           oTabForm1:FormBorderStyle = System.Windows.Forms.FormBorderStyle:None.
+                opChildForm = CAST(oTabForm1, IChildTabForm).
+            END.
+        END CASE.
+ 
+        /* Check if child form was created okay */
+        IF NOT VALID-OBJECT(opChildForm) THEN
+        DO:
+            DEFINE VARIABLE cMissing AS CHARACTER NO-UNDO.
+ 
+            /* Add extra text if file is missing */
+            IF SEARCH(ipTabForm + ".r") = ? THEN
+                cMissing = ipTabForm + ".r was not be found." + CHR(10)
+                         + "You may be running programs from an earlier patch." + CHR(10) + CHR(10).
+ 
+            MESSAGE "Unable to create tab form. Please contact MultiFreight Support."  SKIP(1)
+                    "Tab:"  ipTabText SKIP
+                    "Form:" ipTabForm SKIP(1)
+                    cMissing
+                    "( GetChildForm in" THIS-OBJECT:GetClass():TypeName ")"
+                    VIEW-AS ALERT-BOX ERROR.
+        END.
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE "Unable to create tab form. Please contact MultiFreight Support."  SKIP(1)
+                        "Tab:"  ipTabText SKIP
+                        "Form:" ipTabForm SKIP(1)
+                        e:GetMessage(1)
+                        VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (GetChildForm)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Hide form that displays system messages
+            Notes:
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID HideSystemMsg ( ):
+        /* Delete object reference if form has been closed */
+        IF VALID-OBJECT(ofSystemMsg) AND ofSystemMsg:IsDisposed THEN
+            DELETE OBJECT ofSystemMsg.
+ 
+        /* Hide form */
+        IF VALID-OBJECT(ofSystemMsg) THEN
+            ofSystemMsg:Hide().
+ 
+        /* Empty dataset */
+        DATASET dsSystemMsg:EMPTY-DATASET() NO-ERROR.
+    END METHOD.
+ 
+    METHOD PRIVATE VOID InitializeComponent(  ):
+       
+       
+        Modifying the contents of this method using a code editor will invalidate any support for this file. */
+        THIS-OBJECT:components = NEW System.ComponentModel.Container().
+        THIS-OBJECT:ultraDockManager1 = NEW Infragistics.Win.UltraWinDock.UltraDockManager(THIS-OBJECT:components).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft = NEW Infragistics.Win.UltraWinDock.UnpinnedTabArea().
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight = NEW Infragistics.Win.UltraWinDock.UnpinnedTabArea().
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop = NEW Infragistics.Win.UltraWinDock.UnpinnedTabArea().
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom = NEW Infragistics.Win.UltraWinDock.UnpinnedTabArea().
+       THIS-OBJECT:m_TabbedParentFormTemplateAutoHideControl = NEW Infragistics.Win.UltraWinDock.AutoHideControl().
+        CAST(THIS-OBJECT:ultraDockManager1, System.ComponentModel.ISupportInitialize):BeginInit().
+        THIS-OBJECT:SuspendLayout().
+        /*  */
+        /* ultraDockManager1 */
+        /*  */
+        THIS-OBJECT:ultraDockManager1:CompressUnpinnedTabs = FALSE.
+        THIS-OBJECT:ultraDockManager1:HostControl = THIS-OBJECT.
+        THIS-OBJECT:ultraDockManager1:LayoutStyle = Infragistics.Win.UltraWinDock.DockAreaLayoutStyle:FillContainer.
+        THIS-OBJECT:ultraDockManager1:BeforeToggleDockState:Subscribe(THIS-OBJECT:ultraDockManager1_BeforeToggleDockState).
+        THIS-OBJECT:ultraDockManager1:BeforeDockChange:Subscribe(THIS-OBJECT:ultraDockManager1_BeforeDockChange).
+        THIS-OBJECT:ultraDockManager1:AfterDockChange:Subscribe(THIS-OBJECT:ultraDockManager1_AfterDockChange).
+        THIS-OBJECT:ultraDockManager1:PaneDisplayed:Subscribe(THIS-OBJECT:ultraDockManager1_PaneDisplayed).
+        THIS-OBJECT:ultraDockManager1:AfterToggleDockState:Subscribe(THIS-OBJECT:ultraDockManager1_AfterToggleDockState).
+        /*  */
+        /* m_TabbedParentFormTemplateUnpinnedTabAreaLeft */
+        /*  */
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft:Dock = System.Windows.Forms.DockStyle:Left.
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft:Font = NEW System.Drawing.Font("Microsoft Sans Serif", 8.25, System.Drawing.FontStyle:Regular, System.Drawing.GraphicsUnit:Point, System.Convert:ToByte(0)).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft:Location = NEW System.Drawing.Point(0, 0).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft:Name = "m_TabbedParentFormTemplateUnpinnedTabAreaLeft".
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft:Owner = THIS-OBJECT:ultraDockManager1.
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft:Size = NEW System.Drawing.Size(0, 703).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft:TabIndex = 5.
+        /*  */
+        /* m_TabbedParentFormTemplateUnpinnedTabAreaRight */
+        /*  */
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight:Dock = System.Windows.Forms.DockStyle:Right.
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight:Font = NEW System.Drawing.Font("Microsoft Sans Serif", 8.25, System.Drawing.FontStyle:Regular, System.Drawing.GraphicsUnit:Point, System.Convert:ToByte(0)).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight:Location = NEW System.Drawing.Point(702, 0).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight:Name = "m_TabbedParentFormTemplateUnpinnedTabAreaRight".
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight:Owner = THIS-OBJECT:ultraDockManager1.
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight:Size = NEW System.Drawing.Size(0, 703).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight:TabIndex = 6.
+        /*  */
+        /* m_TabbedParentFormTemplateUnpinnedTabAreaTop */
+        /*  */
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop:Dock = System.Windows.Forms.DockStyle:Top.
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop:Font = NEW System.Drawing.Font("Microsoft Sans Serif", 8.25, System.Drawing.FontStyle:Regular, System.Drawing.GraphicsUnit:Point, System.Convert:ToByte(0)).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop:Location = NEW System.Drawing.Point(0, 0).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop:Name = "m_TabbedParentFormTemplateUnpinnedTabAreaTop".
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop:Owner = THIS-OBJECT:ultraDockManager1.
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop:Size = NEW System.Drawing.Size(702, 0).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop:TabIndex = 7.
+        /*  */
+        /* m_TabbedParentFormTemplateUnpinnedTabAreaBottom */
+        /*  */
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom:Dock = System.Windows.Forms.DockStyle:Bottom.
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom:Font = NEW System.Drawing.Font("Microsoft Sans Serif", 8.25, System.Drawing.FontStyle:Regular, System.Drawing.GraphicsUnit:Point, System.Convert:ToByte(0)).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom:Location = NEW System.Drawing.Point(0, 703).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom:Name = "m_TabbedParentFormTemplateUnpinnedTabAreaBottom".
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom:Owner = THIS-OBJECT:ultraDockManager1.
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom:Size = NEW System.Drawing.Size(702, 0).
+        THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom:TabIndex = 8.
+        /*  */
+        /* m_TabbedParentFormTemplateAutoHideControl */
+       /*  */
+        THIS-OBJECT:m_TabbedParentFormTemplateAutoHideControl:Font = NEW System.Drawing.Font("Microsoft Sans Serif", 8.25, System.Drawing.FontStyle:Regular, System.Drawing.GraphicsUnit:Point, System.Convert:ToByte(0)).
+        THIS-OBJECT:m_TabbedParentFormTemplateAutoHideControl:Location = NEW System.Drawing.Point(0, 0).
+        THIS-OBJECT:m_TabbedParentFormTemplateAutoHideControl:Name = "m_TabbedParentFormTemplateAutoHideControl".
+        THIS-OBJECT:m_TabbedParentFormTemplateAutoHideControl:Owner = THIS-OBJECT:ultraDockManager1.
+        THIS-OBJECT:m_TabbedParentFormTemplateAutoHideControl:Size = NEW System.Drawing.Size(0, 0).
+        THIS-OBJECT:m_TabbedParentFormTemplateAutoHideControl:TabIndex = 9.
+        /*  */
+        /* fpLocation */
+        /*  */
+        THIS-OBJECT:ClientSize = NEW System.Drawing.Size(702, 703).
+        THIS-OBJECT:Controls:Add(THIS-OBJECT:m_TabbedParentFormTemplateAutoHideControl).
+        THIS-OBJECT:Controls:Add(THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaBottom).
+        THIS-OBJECT:Controls:Add(THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaTop).
+        THIS-OBJECT:Controls:Add(THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaRight).
+        THIS-OBJECT:Controls:Add(THIS-OBJECT:m_TabbedParentFormTemplateUnpinnedTabAreaLeft).
+        THIS-OBJECT:Name = "fpLocation".
+        THIS-OBJECT:StartPosition = System.Windows.Forms.FormStartPosition:CenterScreen.
+        THIS-OBJECT:Text = "Calculation Modules".
+        THIS-OBJECT:FormClosed:Subscribe(THIS-OBJECT:fpLocation_FormClosed).
+        THIS-OBJECT:FormClosing:Subscribe(THIS-OBJECT:fpLocation_FormClosing).
+        CAST(THIS-OBJECT:ultraDockManager1, System.ComponentModel.ISupportInitialize):EndInit().
+        THIS-OBJECT:ResumeLayout(FALSE).
+        CATCH e AS Progress.Lang.Error:
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Enable or disable tabbed forms except current tabbed form and
+                     change current tab's text colour so it's identifiable
+            Notes: 1. ipUpdateMode = YES for Update, New or Copy buttons on mfUpdatePanel
+                                     NO  for Save, Delete or Cancel buttons on mfUpdatePanel
+                   2. ipTabbedForm = name of form whose mfUpdatePanel was pressed
+                   3. ipButton     = name of button that was pressed, i.e.
+                                     CANCEL, COPY, DELETE, NEW, SAVE or UPDATE
+    --------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID ChangeUpdateMode ( INPUT ipUpdateMode AS LOGICAL,
+                                                   INPUT ipTabbedForm AS CHARACTER,
+                                                   INPUT ipButton     AS CHARACTER ):
+        /* Store these when checking for transaction and selecting a tab */
+        ASSIGN lUpdateMode  = ipUpdateMode
+               cUpdateForm  = ipTabbedForm
+               cLastPressed = ipButton.
+ 
+        /* Remember current non-update tab text colour */
+        IF ipUpdateMode = YES AND NOT VALID-OBJECT(oForeColor) THEN
+            oForeColor = oDockableControlPaneTab[1]:Settings:TabAppearance:ForeColor.
+ 
+        IF ipUpdateMode THEN /* Update mode */
+        DO:
+            /* Tell current form on all tabs which update panel button was pressed and on which tabbed form */
+            DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+                IF     oDockableControlPaneTab[iCount]:Closed = NO
+                   AND VALID-OBJECT(oDockableControlPaneTab[iCount]:Control) THEN
+                DO:
+                    CAST(oDockableControlPaneTab[iCount]:Control, IChildTabForm):ChangeUpdateMode
+                        (INPUT ipUpdateMode, INPUT ipTabbedForm, INPUT ipButton).
+                END.
+            END.
+ 
+            /* Change text colour of updating tab so users can visually identify it */
+            DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+                IF     oDockableControlPaneTab[iCount]:Closed = NO
+                   AND VALID-OBJECT(oDockableControlPaneTab[iCount]:Control)
+                   AND ipTabbedForm = oDockableControlPaneTab[iCount]:Control:GetType():ToString() THEN
+                DO:
+                    oDockableControlPaneTab[iCount]:Settings:TabAppearance:ForeColor = System.Drawing.Color:DodgerBlue.
+                END.
+            END.
+ 
+            /* Also tell grid form which button was pressed to handle its custom controls */
+            oGridForm:ChangeUpdateMode(INPUT ipUpdateMode, INPUT ipTabbedForm, INPUT ipButton).
+        END.
+        ELSE /* Non-update mode */
+        DO:
+            /* Tell all forms to go into non-update mode */
+            /* NOTE: different because the grid's AfterRowActivate event fires before the form in update mode is  */
+            /*       told it's been cancelled, e.g. if press 'New' while on an AX form & choose dept SX, 'Cancel' */
+            /*       reverts back to original record & tells AX form to end update mode, leaving SX form enabled  */
+            IF VALID-OBJECT(oTabForm1)  THEN oTabForm1:ChangeUpdateMode(INPUT ipUpdateMode, INPUT ipTabbedForm, INPUT ipButton).
+ 
+            /* Change text colour of all tabs back to original colour */
+            DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+                oDockableControlPaneTab[iCount]:Settings:TabAppearance:ForeColor = oForeColor.
+            END.
+ 
+            /* Also tell grid form which button was pressed to handle its custom controls */
+            oGridForm:ChangeUpdateMode(INPUT ipUpdateMode, INPUT ipTabbedForm, INPUT ipButton).
+ 
+            /* Refresh data in visible undocked tabs after saving a record on the header tab form */
+            IF     cLastPressed = "SAVE"
+               AND (IF VALID-OBJECT(oTabForm1) THEN cUpdateForm = oTabForm1:GetType():ToString() ELSE NO) THEN
+            DO:
+                THIS-OBJECT:RefreshTabbedForms().
+            END.
+        END.
+ 
+        /* Refresh single row after cancel update mode to ensure current grid's row is correctly displayed */
+        /* e.g. if on AX job then create new SX job & cancel it, some fields on AX job don't show correct values */
+        IF ipButton = "CANCEL" THEN
+            THIS-OBJECT:RefreshGridRow().
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (ChangeUpdateMode)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Perform garbage collection on .NET object reference and clear
+                     memory resources for tabbed forms and class objects
+            Notes:
+    ------------------------------------------------------------------------------*/
+    METHOD PRIVATE VOID CleanUp ( ):
+        IF VALID-OBJECT(oGridForm) THEN
+        DO:
+            oGridForm:Close().
+            IF NOT oGridForm:IsDisposed THEN
+                oGridForm:Dispose().
+            DELETE OBJECT oGridForm.
+        END.
+        IF VALID-OBJECT(oTabForm1) THEN
+        DO:
+            oTabForm1:Close().
+            IF NOT oTabForm1:IsDisposed THEN
+                oTabForm1:Dispose().
+            DELETE OBJECT oTabForm1.
+        END.
+ 
+        IF VALID-OBJECT(oDockableControlPaneGrid) THEN
+        DO:
+            oDockableControlPaneGrid:Dispose().
+            DELETE OBJECT oDockableControlPaneGrid.
+        END.
+ 
+        DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+            IF VALID-OBJECT(oDockableControlPaneTab[iCount]) THEN
+            DO:
+                oDockableControlPaneTab[iCount]:Dispose().
+                DELETE OBJECT oDockableControlPaneTab[iCount].
+            END.
+        END.
+ 
+        IF VALID-OBJECT(oDockableGroupPane) THEN
+        DO:
+            oDockableGroupPane:Dispose().
+            DELETE OBJECT oDockableGroupPane.
+        END.
+ 
+        IF VALID-OBJECT(oDockAreaPaneBottom) THEN
+        DO:
+            oDockAreaPaneBottom:Dispose().
+            DELETE OBJECT oDockAreaPaneBottom.
+        END.
+ 
+        IF VALID-OBJECT(oDockAreaPaneLeft) THEN
+        DO:
+            oDockAreaPaneLeft:Dispose().
+            DELETE OBJECT oDockAreaPaneLeft.
+        END.
+ 
+        IF VALID-OBJECT(oDockAreaPaneRight) THEN
+        DO:
+            oDockAreaPaneRight:Dispose().
+            DELETE OBJECT oDockAreaPaneRight.
+        END.
+ 
+        IF VALID-OBJECT(oDockAreaPaneTop) THEN
+        DO:
+            oDockAreaPaneTop:Dispose().
+            DELETE OBJECT oDockAreaPaneTop.
+        END.
+ 
+        IF VALID-OBJECT(oLastPane) THEN
+        DO:
+            oLastPane:Dispose().
+            DELETE OBJECT oLastPane.
+        END.
+ 
+        IF VALID-OBJECT(oForeColor) THEN
+            DELETE OBJECT oForeColor.
+ 
+        IF VALID-OBJECT(oBindingSource) THEN
+        DO:
+            oBindingSource:Dispose().
+            DELETE OBJECT oBindingSource.
+        END.
+ 
+        IF VALID-OBJECT(ofProgressBar) THEN
+        DO:
+            ofProgressBar:Close().
+            IF NOT ofProgressBar:IsDisposed THEN
+                ofProgressBar:Dispose().
+            DELETE OBJECT ofProgressBar.
+        END.
+ 
+        IF VALID-OBJECT(ofSystemMsg) THEN
+        DO:
+            ofSystemMsg:Close().
+            IF NOT ofSystemMsg:IsDisposed THEN
+                ofSystemMsg:Dispose().
+            DELETE OBJECT ofSystemMsg.
+        END.
+ 
+        IF VALID-OBJECT(oFormLayout) THEN
+            DELETE OBJECT oFormLayout.
+ 
+        IF VALID-OBJECT(oMsgTable) THEN
+            DELETE OBJECT oMsgTable.
+ 
+        IF VALID-OBJECT(oSyslabelTable) THEN
+            DELETE OBJECT oSyslabelTable.
+ 
+        IF VALID-OBJECT(oSystabTable) THEN
+            DELETE OBJECT oSystabTable.
+ 
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Refresh data in form on currently selected tab
+            Notes: 1. ipDockableControlPane = currently selected tab
+    ------------------------------------------------------------------------------*/
+    METHOD PRIVATE VOID RefreshDataInForm ( INPUT ipDockableControlPane AS DockableControlPane ):
+        DEFINE VARIABLE cFieldValue AS CHARACTER NO-UNDO.
+ 
+        /* Pass details of current record to child form so it refreshes its data */
+        /* Note: product code is stored in ttLocation.Calc-code */
+        cFieldValue = STRING(oBindingSource:HANDLE:GET-BUFFER-HANDLE(1):BUFFER-FIELD("Calc-code"):BUFFER-VALUE()) NO-ERROR.
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (RefreshDataInForm)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: After applying column filters to a grid, we must customise controls
+                     like update panels, button groupboxes, etc. depending on whether
+                     grid has any rows left in all child tabbed forms
+            Notes: required as filtering out all rows doesn't fire grid's AfterRowActivate event
+                INPUT
+                1. ipNumResults = number of filtered in results left in grid
+                2. ipChildForm  = name of child tabbed form containing the grid to
+                                  distinguish between main grids and sub-grids
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID RefreshGridFilterResults ( INPUT ipNumResults AS INTEGER, INPUT ipChildForm AS CHARACTER ):
+        /* Store the parameters */
+        ASSIGN iGridFilterResultsCount = ipNumResults
+               cGridFilterResultsForm  = ipChildForm.
+ 
+        /* Main grid = tell all child tabs number of results in grid */
+        /* Sub  grid = customise child tab's controls - not needed if child tab has no update controls, e.g. ftAddressJobs */
+        CASE ipChildForm:
+            WHEN "ftLocationGrid" THEN
+            DO:
+                /* Codes form */
+                IF VALID-OBJECT(oDockableControlPaneTab[1]) AND VALID-OBJECT(oDockableControlPaneTab[1]:Control) THEN
+               DO:
+                    IF     VALID-OBJECT(oTabForm1)
+                       AND oTabForm1:GetType():ToString() = oDockableControlPaneTab[1]:Control:GetType():ToString()
+                        THEN oTabForm1:AfterFilteredGrid(INPUT ipNumResults).
+                END.
+            END.
+        END CASE.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Force main grid to refresh dataset record for its current row
+            Notes: If a child tab form has its own dataset, it will be refreshed when
+                   its tab is selected as TabsSelect will run RefreshDataInForm
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID RefreshGridRow ( ):
+        oGridForm:RefreshGridRow().
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Tell child forms grid has changed row,
+                     e.g. customise controls or refresh their own data
+            Notes: 1. DON'T RUN HideSystemMsg method! Or validation messages generated
+                      during drill down in update mode are hidden before user see them
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID RefreshTabbedForms ( ):
+        DEFINE VARIABLE iRefreshCnt AS INTEGER   NO-UNDO.
+ 
+        /* If RefreshTabbedForms is run before constructor, oBindingSource isn't valid so skip */
+        IF NOT VALID-OBJECT(oBindingSource) THEN
+            RETURN.
+ 
+        THIS-OBJECT:SuspendLayout().
+ 
+        /* Customise which form to show on tabs but only for tabs that already have forms and */
+        /* is in view, maybe undocked. TabsSelect() will also refresh data in the tab form.   */
+        DO iRefreshCnt = 1 TO EXTENT(oDockableControlPaneTab):
+            IF     VALID-OBJECT(oDockableControlPaneTab[iRefreshCnt]:Control)
+               AND oDockableControlPaneTab[iRefreshCnt]:Closed   = NO
+               AND oDockableControlPaneTab[iRefreshCnt]:IsInView = YES THEN
+            DO:
+                THIS-OBJECT:TabsSelect(INPUT oDockableControlPaneTab[iRefreshCnt]).
+            END.
+        END.
+ 
+        THIS-OBJECT:ResumeLayout().
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (RefreshTabbedForms)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Reset tabs and dock areas to initial layout and also choose to
+                     reset grid to its default layout or not
+            Notes: Run by mfGridMenuStrip
+                INPUT
+                1. ipResetGrid  = YES to reset grid to its default layout
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID ResetParentForm ( INPUT ipResetGrid AS LOGICAL ):
+        /* Get ttSavedGrid if running form's default view or one of its saved view */
+        FIND FIRST ttSavedGrid NO-ERROR.
+        IF AVAILABLE ttSavedGrid THEN
+            Statics:oTreeMenu:ReRunNETProgram(INPUT ttSavedGrid.menu-id,
+                                              INPUT ttSavedGrid.menu-action,
+                                              INPUT ttSavedGrid.menu-user,
+                                              INPUT ttSavedGrid.view-name,
+                                              INPUT ipResetGrid).
+        ELSE /* Use menu-id passed to constructor when this form was first run */
+            Statics:oTreeMenu:ReRunNETProgram(INPUT iMenuID,
+                                              INPUT THIS-OBJECT:GetClass():TypeName,
+                                              INPUT Statics:cUser,
+                                             INPUT "",
+                                              INPUT ipResetGrid).
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Reset tabs and dock areas to initial layout and also choose to
+                     reset main grid and/or sub-grids to their default layout
+            Notes: Run by mfGridMenuStrip
+                INPUT
+                1. ipResetGrid    = YES to reset parent form's main grid to its default layout
+                2. ipResetSubGrid = child form whose sub-grids' layouts to reset or blank, e.g. ftAddressJobs
+                3. ipSubGridName  = name of sub-grid or blank for all sub-grids on a child form
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID ResetParentForm ( INPUT ipResetGrid    AS LOGICAL,
+                                                  INPUT ipResetSubGrid AS CHARACTER,
+                                                  INPUT ipSubGridName  AS CHARACTER ):
+        /* Delete all sub-grid layouts for this child form */
+        IF ipResetSubGrid NE "" THEN
+        DO:
+            /* Delete sub-grid's layout */
+            RUN sGridResetLayout.p ON Statics:GetAppServer()
+                (INPUT ipResetSubGrid, INPUT ipSubGridName, INPUT Statics:cUser).
+        END.
+ 
+        /* Get ttSavedGrid if running form's default view or one of its saved view */
+        FIND FIRST ttSavedGrid NO-ERROR.
+        IF AVAILABLE ttSavedGrid THEN
+            Statics:oTreeMenu:ReRunNETProgram(INPUT ttSavedGrid.menu-id,
+                                              INPUT ttSavedGrid.menu-action,
+                                              INPUT ttSavedGrid.menu-user,
+                                              INPUT ttSavedGrid.view-name,
+                                              INPUT ipResetGrid).
+        ELSE /* Use menu-id passed to constructor when this form was first run */
+            Statics:oTreeMenu:ReRunNETProgram(INPUT iMenuID,
+                                              INPUT THIS-OBJECT:GetClass():TypeName,
+                                              INPUT Statics:cUser,
+                                              INPUT "",
+                                              INPUT ipResetGrid).
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Turn on/off flag indicating form is updating data
+            Notes: Used for updateable grids which won't call ChangeUpdateMode() by
+                   clicking button on mfUpdatePanel.cls
+            1. ipUpdateMode = YES if updating else NO
+            2. ipTabbedForm = name of form changing its update mode
+            The form calling this method will enable/disable its own controls, not here
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID SetUpdateMode ( INPUT ipUpdateMode AS LOGICAL,
+                                                INPUT ipTabbedForm AS CHARACTER ):
+        DEFINE VARIABLE cButton AS CHARACTER NO-UNDO.
+ 
+        /* Set flag and always disable grid form */
+        /* Use dummy button name to match update mode */
+        ASSIGN lUpdateMode       = ipUpdateMode
+               cUpdateForm       = ipTabbedForm
+               cLastPressed      = IF ipUpdateMode THEN "UPDATE"
+                                   ELSE "CANCEL"
+               oGridForm:Enabled = NOT ipUpdateMode.
+ 
+        /* Remember current non-update tab text colour */
+        IF ipUpdateMode = YES AND NOT VALID-OBJECT(oForeColor) THEN
+            oForeColor = oDockableControlPaneTab[1]:Settings:TabAppearance:ForeColor.
+ 
+        /* Change update mode in forms except the one calling this method */
+        DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+            IF     oDockableControlPaneTab[iCount]:Closed = NO
+               AND VALID-OBJECT(oDockableControlPaneTab[iCount]:Control)
+               AND ipTabbedForm NE oDockableControlPaneTab[iCount]:Control:GetType():ToString() THEN
+            DO:
+                CAST(oDockableControlPaneTab[iCount]:Control, IChildTabForm):ChangeUpdateMode
+                    (INPUT lUpdateMode, INPUT cUpdateForm, INPUT cLastPressed).
+            END.
+        END.
+ 
+        /* Change text colour of updating tab so users can visually identify it */
+        IF ipUpdateMode THEN
+        DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+            IF     oDockableControlPaneTab[iCount]:Closed = NO
+               AND VALID-OBJECT(oDockableControlPaneTab[iCount]:Control)
+               AND ipTabbedForm = oDockableControlPaneTab[iCount]:Control:GetType():ToString() THEN
+            DO:
+                oDockableControlPaneTab[iCount]:Settings:TabAppearance:ForeColor = System.Drawing.Color:DodgerBlue.
+            END.
+        END.
+        ELSE
+        /* Change text colour of all tabs back to original colour */
+        DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+            oDockableControlPaneTab[iCount]:Settings:TabAppearance:ForeColor = oForeColor.
+        END.
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (SetUpdateMode)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Display system messages
+            Notes:
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID ShowSystemMsg ( INPUT DATASET dsSystemMsg ):
+        /* Quit if no records and ensure fSystemMsg is hidden */
+        IF NOT CAN-FIND(FIRST ttSystemMsg) THEN
+        DO:
+            THIS-OBJECT:HideSystemMsg().
+            RETURN.
+        END.
+ 
+        /* Delete object reference if form has been closed */
+        IF VALID-OBJECT(ofSystemMsg) AND ofSystemMsg:IsDisposed THEN
+            DELETE OBJECT ofSystemMsg.
+ 
+        /* Show messages then delete them */
+        IF VALID-OBJECT(ofSystemMsg) THEN
+            ofSystemMsg:DisplayMessages(INPUT DATASET dsSystemMsg).
+        ELSE
+            ofSystemMsg = NEW fSystemMsg (INPUT DATASET dsSystemMsg).
+ 
+        /* Empty dataset */
+        DATASET dsSystemMsg:EMPTY-DATASET() NO-ERROR.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Create all docking controls plus grid child only as
+                     other child forms could require tab customisation
+            Notes: 1. A DockableControlPane has these labels:
+                        a. Key     = label in English used to match systab records
+                                     (constructor's 1st input parameter)
+                        b. Text    = pane's caption (constructor's 2nd input parameter)
+                        c. TextTab = tab's caption
+                        Text & TextTab must be set to same value or it won't be displayed
+    ------------------------------------------------------------------------------*/
+    METHOD PRIVATE VOID TabsCreate ( ):
+ 
+        IF NOT VALID-OBJECT(oSyslabelTable) THEN
+            oSyslabelTable = NEW SyslabelTable().
+ 
+        /* Show progress screen before tabs are shown or skip if already visible */
+        IF THIS-OBJECT:Visible THEN
+            RETURN.
+        ELSE
+        DO:
+            ofProgressBar = NEW fProgressBar("Loading").
+            ofProgressBar:ChangeMsg("Populating records").
+            ofProgressBar:PerformStep(2).
+        END.
+ 
+        /* Set up list of the default & variant forms on each tab that */
+        /* are provided to all customers, not customer-specific forms, */
+        /* e.g. ftJobHeaderSI is the default for Sea Import.           */
+        cTabDefaultForms = "ftLocation".
+ 
+        /* Set up lists of caption text in English and translated for all tabs */
+        /* NOTE: keep grid & other tabs labels separate as tab customisation doesn't apply to grid tab */
+        ASSIGN cGridInEnglish = "Calculation Type Grid"
+               cTabsInEnglish = "Details".
+        oSyslabelTable:GetTabLabels(INPUT THIS-OBJECT:GetType():ToString(),
+                                    INPUT cGridInEnglish + "," + cTabsInEnglish,
+                                    INPUT Statics:cLanguage,
+                                    OUTPUT cTabsTranslated).
+        ASSIGN cGridTranslated = ENTRY(1, cTabsTranslated)
+               cTabsTranslated = REPLACE(cTabsTranslated, cGridTranslated + ",", "").
+ 
+        /* Create the dock areas where tabs can be docked */
+        /* plus the group pane for the tabbed child forms */
+        ASSIGN oDockAreaPaneTop                  = NEW DockAreaPane (DockedLocation:DockedTop)
+               oDockAreaPaneBottom               = NEW DockAreaPane (DockedLocation:DockedBottom)
+               oDockAreaPaneLeft                 = NEW DockAreaPane (DockedLocation:DockedLeft)
+               oDockAreaPaneRight                = NEW DockAreaPane (DockedLocation:DockedRight)
+               oDockAreaPaneTop:Size             = NEW System.Drawing.Size(iPanelWidth,iPanelGridHeight)
+               oDockAreaPaneBottom:Size          = NEW System.Drawing.Size(iPanelWidth,iPanelTabHeight)
+               oDockAreaPaneLeft:Size            = NEW System.Drawing.Size(iPanelWidth,iPanelTabHeight)
+               oDockAreaPaneRight:Size           = NEW System.Drawing.Size(iPanelWidth,iPanelTabHeight)
+               oDockableGroupPane                = NEW DockableGroupPane ()
+               oDockableGroupPane:ChildPaneStyle = ChildPaneStyle:TabGroup.
+ 
+        /* Create grid form and the control pane that hosts it */
+        ASSIGN oGridForm                 = NEW ftLocationGrid(INPUT TABLE ttSavedGrid, INPUT THIS-OBJECT, INPUT iMenuID,
+                                                                OUTPUT oBindingSource, OUTPUT cGridName)
+               oGridForm:Name            = cGridInEnglish
+               oGridForm:TopLevel        = NO
+               oGridForm:FormBorderStyle = System.Windows.Forms.FormBorderStyle:NONE.
+ 
+        ASSIGN oDockableControlPaneGrid                   = NEW DockableControlPane (cGridInEnglish, cGridTranslated, oGridForm)
+               oDockableControlPaneGrid:IsMdiChild        = YES
+               oDockableControlPaneGrid:Text              = cGridTranslated
+               oDockableControlPaneGrid:Size              = NEW System.Drawing.Size(iPanelWidth,iPanelGridHeight)
+               oDockableControlPaneGrid:Settings:AllowPin = Infragistics.Win.DefaultableBoolean:TRUE.
+ 
+        /* Update progress bar */
+        ofProgressBar:ChangeMsg("Creating tabs").
+        ofProgressBar:PerformStep(1).
+ 
+        /* Create control panes for tabbed child forms without the actual child form  */
+        /* When a tab is selected, TabsSelect() will add the correct child form to it */
+        ASSIGN cTitle                                       = ENTRY(1, cTabsTranslated)
+               oDockableControlPaneTab[1]                   = NEW DockableControlPane (ENTRY(1, cTabsInEnglish), cTitle)
+               oDockableControlPaneTab[1]:IsMdiChild        = YES
+               oDockableControlPaneTab[1]:Text              = cTitle
+               oDockableControlPaneTab[1]:Size              = NEW System.Drawing.Size(iPanelWidth,iPanelTabHeight)
+               oDockableControlPaneTab[1]:Settings:AllowPin = Infragistics.Win.DefaultableBoolean:TRUE.
+ 
+        /* Check if all tabs have default systab record for current or blank parent form */
+        oSystabTable:CheckDefaultTabs(INPUT THIS-OBJECT:GetType():ToString(),
+                                      INPUT cTabsInEnglish,
+                                      INPUT cTabDefaultForms,
+                                      INPUT Statics:cLanguage,
+                                      OUTPUT lDefaultTabsOK,
+                                      OUTPUT DATASET dsSystemMsg).
+ 
+        /* Show system messages individually as child tabs may run HideSystemMsg before msgs can be read */
+        IF CAN-FIND(FIRST ttSystemMsg) THEN
+        FOR EACH ttSystemMsg:
+            Statics:ShowMsg(ttSystemMsg.msg-text, ttSystemMsg.msg-title, "OK", ttSystemMsg.msg-alert-style).
+            DELETE ttSystemMsg.
+        END.
+        ELSE
+            HideSystemMsg().
+ 
+        /* Still attempt tab customisation whether all default tabs exist or not */
+        THIS-OBJECT:TabsCustomise().
+ 
+        /* Add control panes to group pane and/or dock area panes */
+        /* NOTE: group pane must have its panes added before being added to dock area */
+        DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+            oDockableGroupPane:Panes:Add(oDockableControlPaneTab[iCount]).
+        END.
+ 
+        /* Add grid pane to top dock area */
+        oDockAreaPaneTop:Panes:Add(oDockableControlPaneGrid).
+ 
+        /* Add group pane to bottom dock area */
+        oDockAreaPaneBottom:Panes:Add(oDockableGroupPane).
+ 
+        /* Update progress bar */
+        ofProgressBar:ChangeMsg("Choosing form to show on tab").
+        ofProgressBar:PerformStep(3).
+ 
+        /* Add dock areas to manager's dock areas collection */
+        /* Note: this triggers UltraDockManager's PaneDisplayed event */
+        /* Note: add grid form's dock area pane last so it's resized when parent form is resized, not the child tabs */
+        ultraDockManager1:DockAreas:Add (oDockAreaPaneLeft).
+        ultraDockManager1:DockAreas:Add (oDockAreaPaneRight).
+        ultraDockManager1:DockAreas:Add (oDockAreaPaneBottom).
+        ultraDockManager1:DockAreas:Add (oDockAreaPaneTop).
+ 
+        /* Set tab style and other settings */
+        ASSIGN ultraDockManager1:DefaultGroupSettings:TabLocation      = Infragistics.Win.UltraWinDock.Location:Top
+               ultraDockManager1:DefaultGroupSettings:TabStyle         = Infragistics.Win.UltraWinTabs.TabStyle:Office2007Ribbon
+               ultraDockManager1:DefaultGroupSettings:TabSizing        = Infragistics.Win.UltraWinTabs.TabSizing:AutoSize
+               ultraDockManager1:ShowPinButton                         = YES
+               ultraDockManager1:ShowDisabledButtons                   = NO
+               ultraDockManager1:DefaultPaneSettings:DoubleClickAction = PaneDoubleClickAction:ToggleDockedState
+               ultraDockManager1:DefaultPaneSettings:AllowClose        = Infragistics.Win.DefaultableBoolean:False
+               ultraDockManager1:DefaultPaneSettings:AllowMaximize     = Infragistics.Win.DefaultableBoolean:False
+               ultraDockManager1:DefaultPaneSettings:AllowMinimize     = Infragistics.Win.DefaultableBoolean:False
+               ultraDockManager1:DefaultPaneSettings:AllowResize       = Infragistics.Win.DefaultableBoolean:True.
+ 
+        /* Show grid form */
+        oGridForm:Show().
+ 
+        /* Update progress bar */
+        ofProgressBar:ChangeMsg("Refresh data in tabs").
+        ofProgressBar:PerformStep(2).
+ 
+        /* When TabsCreate creates the grid form, the grid's AfterRowActivate event runs this parent's     */
+        /* RefreshTabbedForms method BEFORE TabsCreate has managed to create the other child tabs. So we   */
+        /* need to rerun RefreshTabbedForms to tell any child forms which record the grid is positioned on */
+        THIS-OBJECT:RefreshTabbedForms().
+ 
+        /* Update progress bar then dispose */
+        ofProgressBar:ChangeMsg("Complete").
+        ofProgressBar:PerformStep(2).
+        IF NOT ofProgressBar:IsDisposed THEN
+            ofProgressBar:Dispose().
+        IF VALID-OBJECT(ofProgressBar) THEN
+            DELETE OBJECT ofProgressBar.
+ 
+        /* Remember current non-update tab text colour */
+        IF NOT VALID-OBJECT(oForeColor) THEN
+            oForeColor = oDockableControlPaneTab[1]:Settings:TabAppearance:ForeColor.
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (TabsCreate)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Customise which tabs are visible for current record's dept and/or
+                     transport type and user's permissions in tab setup
+            Notes: dept/transport type isn't used
+    ------------------------------------------------------------------------------*/
+    METHOD PRIVATE VOID TabsCustomise ( ):
+ 
+        DEFINE VARIABLE oSelectedTab AS DockableControlPane NO-UNDO.
+        DEFINE VARIABLE cDeptValue   AS CHARACTER           NO-UNDO.       
+ 
+        /* Skip if already been customised as done once */
+        IF lTabsCustomised THEN
+            RETURN.
+ 
+        /* Identify currently selected tab */
+        DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+            IF oDockableControlPaneTab[iCount]:IsSelectedTab THEN
+            DO:
+                oSelectedTab = oDockableControlPaneTab[iCount].
+                LEAVE.
+            END.
+        END.
+ 
+        /* Populate systab dataset for these tabs and current parent form, user, user group but not dept */
+        oSystabTable:GetTabSetup(INPUT THIS-OBJECT:GetType():ToString(),
+                                 INPUT cTabsInEnglish,
+                                 INPUT Statics:cUser,
+                                 INPUT Statics:cUGroup,
+                                 INPUT "",
+                                 OUTPUT DATASET dsSystab).
+ 
+        /* Show or hide tabs depending on permissions for current user and user's group */
+        DO iCount = 1 TO EXTENT(oDockableControlPaneTab):
+            /* Tab must have systab record for it to be visible */
+            FIND FIRST ttSystab WHERE ttSystab.parent-tab = oDockableControlPaneTab[iCount]:Key NO-ERROR.
+            IF AVAILABLE ttSystab THEN
+            DO:
+                /* Close tab if it should be hidden from user */
+                IF    CAN-DO(ttSystab.hide-users,  Statics:cUser)
+                   OR CAN-DO(ttSystab.hide-groups, Statics:cUGroup) THEN
+                    oDockableControlPaneTab[iCount]:Close().
+                ELSE /* Show tab if it's closed */
+                    IF oDockableControlPaneTab[iCount]:Closed THEN
+                        oDockableControlPaneTab[iCount]:Show().
+            END.
+            ELSE /* Close tab if it's showing */
+                IF NOT oDockableControlPaneTab[iCount]:Closed THEN
+                    oDockableControlPaneTab[iCount]:Close().
+        END.
+ 
+        /* Select previously selected tab if still visible */
+        IF VALID-OBJECT(oSelectedTab) AND NOT oSelectedTab:Closed THEN
+            oSelectedTab:IsSelectedTab = YES.
+ 
+        /* Set flag that this method has been ran */
+        lTabsCustomised = YES.
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (TabsCustomise)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Customise which form to show when user selects a tab
+            Notes: 1. ipDockableControlPane = currently selected tab
+    ------------------------------------------------------------------------------*/
+    METHOD PRIVATE VOID TabsSelect ( INPUT ipDockableControlPane AS DockableControlPane ):
+        DEFINE VARIABLE oChildTabForm AS IChildTabForm NO-UNDO.
+        DEFINE VARIABLE lFormChanged  AS LOGICAL       NO-UNDO.
+ 
+        /* Skip if we haven't customised tabs yet */
+        IF NOT CAN-FIND(FIRST ttSystab) THEN
+            RETURN.
+ 
+        /* Identify which child form to show on current tab */
+        /* Tab must have systab record for it to be visible */
+        FIND FIRST ttSystab WHERE ttSystab.parent-tab = ipDockableControlPane:Key NO-ERROR.
+        IF NOT AVAILABLE ttSystab THEN
+        DO:
+            /* "&1 tab does not have a tab maintenance record. Please contact MultiFreight Support." */
+            oMsgTable:GetMessage("00000025", Statics:cLanguage, "", ipDockableControlPane:Key, OUTPUT cMsg, OUTPUT cStyle, OUTPUT cTitle).
+            Statics:ShowMsg(cMsg, cTitle, "OK", cStyle).
+            RETURN.
+        END.
+ 
+        Statics:HourglassCursor(YES). /* Change cursor */
+ 
+        /* Get correct form to show */
+        THIS-OBJECT:GetChildForm (INPUT ipDockableControlPane:Key,
+                                  INPUT ttSystab.tab-form,
+                                  OUTPUT oChildTabForm).
+ 
+        /* Identify when form has changed on selected tab */
+        IF    NOT VALID-OBJECT(ipDockableControlPane:Control)
+           OR (    VALID-OBJECT(ipDockableControlPane:Control)
+               AND ipDockableControlPane:Control:GetType():ToString() NE ttSystab.tab-form) THEN
+            lFormChanged = YES.
+ 
+        /* Hide current form if it doesn't match systab record */
+        IF     VALID-OBJECT(ipDockableControlPane:Control)
+           AND ipDockableControlPane:Control:GetType():ToString() NE ttSystab.tab-form THEN
+            ipDockableControlPane:Control:Hide().
+ 
+        /* Set correct form on tab if it hasn't got one or it's been hidden */
+        IF VALID-OBJECT(oChildTabForm) THEN
+        DO:
+            IF    NOT VALID-OBJECT(ipDockableControlPane:Control)
+               OR (    VALID-OBJECT(ipDockableControlPane:Control)
+                   AND NOT ipDockableControlPane:Control:Visible) THEN
+                ipDockableControlPane:Control = oChildTabForm.
+        END.
+ 
+        /* Show tab's form */
+        IF VALID-OBJECT(ipDockableControlPane:Control) THEN
+            ipDockableControlPane:Control:Show().
+ 
+        /* Disable or enable as required */
+        /* NOTE: Must do this BEFORE calling RefreshDataInForm() else panel, etc. are wrongly enabled */
+        IF    CAN-DO(ttSystab.disable-users,  Statics:cUser)
+           OR CAN-DO(ttSystab.disable-groups, Statics:cUGroup) THEN
+        DO:
+            IF VALID-OBJECT(oChildTabForm) THEN
+                oChildTabForm:DisableTab().
+        END.
+ 
+        /* Disable if updating another tab */
+        IF VALID-OBJECT(oChildTabForm) THEN
+        DO:
+            IF lUpdateMode AND cUpdateForm NE ttSystab.tab-form THEN
+                oChildTabForm:ChangeUpdateMode(INPUT lUpdateMode, INPUT cUpdateForm, INPUT cLastPressed).
+        END.
+ 
+        /* Refresh data in child forms if required, will enable/disable update panel buttons */
+        /* 1. Not in update mode as data can't change when main grid is disabled and */
+        /*    any call of mfUpdatePanel's InitializeButtons will mess up its buttons */
+        IF NOT lUpdateMode OR (lUpdateMode AND lFormChanged) THEN
+            THIS-OBJECT:RefreshDataInForm(ipDockableControlPane).
+ 
+        /* Rerun RefreshGridFilterResults if main grid's previous filter had no results */
+        /* else newly clicked on tab hasn't been told the results of the filtering      */
+        IF iGridFilterResultsCount = 0 AND cGridFilterResultsForm = oGridForm:GetClass():TypeName THEN
+            THIS-OBJECT:RefreshGridFilterResults (INPUT iGridFilterResultsCount, INPUT cGridFilterResultsForm).
+ 
+        /* Run ChangeUpdateMode again as panel, etc. can become re-enabled for some reason */
+        IF VALID-OBJECT(oChildTabForm) THEN
+        DO:
+            IF lUpdateMode AND cUpdateForm NE ttSystab.tab-form THEN
+                oChildTabForm:ChangeUpdateMode(INPUT lUpdateMode, INPUT cUpdateForm, INPUT cLastPressed).
+        END.
+ 
+        Statics:HourglassCursor(NO). /* Reset cursor */
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (TabsSelect)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Identify when pane is undocked so we can prevent PaneDisplayed
+                     event else it brings into view each subsequent tab and creates
+                     its child form
+            Notes:
+    ------------------------------------------------------------------------------*/
+    @VisualDesigner.
+    METHOD PRIVATE VOID ultraDockManager1_AfterDockChange( INPUT sender AS System.Object, INPUT e AS Infragistics.Win.UltraWinDock.PaneEventArgs ):
+        /* Reset */
+        lUndockTab = NO.
+ 
+        /* After dock status is completed, ensure last looped pane has a valid child form */
+        IF VALID-OBJECT(oLastPane) THEN
+        DO:
+            IF NOT VALID-OBJECT(oLastPane:Control) THEN
+                ultraDockManager1_PaneDisplayed( NEW System.Object(), NEW Infragistics.Win.UltraWinDock.PaneDisplayedEventArgs(oLastPane)).
+            oLastPane = ?.
+        END.
+        RETURN.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Identify when pane is undocked so we can prevent PaneDisplayed
+                     event else it brings into view each subsequent tab and creates
+                     its child form
+            Notes:
+    ------------------------------------------------------------------------------*/
+    @VisualDesigner.
+    METHOD PRIVATE VOID ultraDockManager1_AfterToggleDockState( INPUT sender AS System.Object, INPUT e AS Infragistics.Win.UltraWinDock.PaneEventArgs ):
+        /* Reset */
+        lUndockTab = NO.
+ 
+        /* After dock status is completed, ensure last looped pane has a valid child form */
+        IF VALID-OBJECT(oLastPane) THEN
+        DO:
+            IF NOT VALID-OBJECT(oLastPane:Control) THEN
+                ultraDockManager1_PaneDisplayed( NEW System.Object(), NEW Infragistics.Win.UltraWinDock.PaneDisplayedEventArgs(oLastPane)).
+            oLastPane = ?.
+        END.
+        RETURN.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Identify when pane is undocked so we can prevent PaneDisplayed
+                     event else it brings into view each subsequent tab and creates
+                     its child form
+            Notes:
+    ------------------------------------------------------------------------------*/
+    @VisualDesigner.
+    METHOD PRIVATE VOID ultraDockManager1_BeforeDockChange( INPUT sender AS System.Object, INPUT e AS Infragistics.Win.UltraWinDock.BeforeDockChangeEventArgs ):
+        /* Set flag for use in PaneDisplayed event */
+        lUndockTab = YES.
+        RETURN.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Identify when pane is undocked so we can prevent PaneDisplayed
+                     event else it brings into view each subsequent tab and creates
+                     its child form
+            Notes:
+    ------------------------------------------------------------------------------*/
+    @VisualDesigner.
+    METHOD PRIVATE VOID ultraDockManager1_BeforeToggleDockState( INPUT sender AS System.Object, INPUT e AS Infragistics.Win.UltraWinDock.CancelablePaneEventArgs ):
+        /* Set flag for use in PaneDisplayed event */
+        lUndockTab = YES.
+        RETURN.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Pass currently selected tab to method that customises which form
+                     is shown on currently select tab
+            Notes:
+    ------------------------------------------------------------------------------*/
+    @VisualDesigner.
+    METHOD PRIVATE VOID ultraDockManager1_PaneDisplayed( INPUT sender AS System.Object, INPUT e AS Infragistics.Win.UltraWinDock.PaneDisplayedEventArgs ):
+        /* Remember current pane for after dock status has completed */
+        IF lUndockTab THEN
+            oLastPane = e:Pane.
+ 
+        /* Skip grid form or when form is closing or during dock/float process */
+        IF e:Pane = oDockableControlPaneGrid OR lFormClosing OR lUndockTab THEN
+            RETURN.
+        ELSE
+            THIS-OBJECT:TabsSelect(INPUT e:Pane).
+        RETURN.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Save validation run via update panel that:
+                     a. Checks for mandatory fields
+                     b. Requires user input, e.g. dialog screens, confirmation messages, etc.
+            Notes:
+                INPUT
+                1. ipTabbedForm = name of form that mfUpdatePanel is on
+                2. opResult     = YES if passed validation, NO if failed
+                3. Return value is VOID so GUI dialog-boxes, etc. don't cause
+                   'Input blocking statement is invalid while executing a user
+                   defined function or method  (11690).' Progress error
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE PUBLIC VOID UserInputValidation ( INPUT ipTabbedForm AS CHARACTER, OUTPUT opResult AS LOGICAL):
+        DEFINE VARIABLE lResult AS LOGICAL NO-UNDO INITIAL YES.
+ 
+        /* Details form */
+        IF VALID-OBJECT(oTabForm1) AND ipTabbedForm = oTabForm1:GetType():ToString() THEN
+            oTabForm1:UserInputValidation(OUTPUT lResult).
+ 
+        opResult = lResult.
+    END METHOD.
+ 
+    DESTRUCTOR PUBLIC fpLocation ( ):
+ 
+        /* Ensure ultraDockManager1_PaneDisplayed stops when form closes */
+        lFormClosing = YES.
+ 
+        CleanUp().
+ 
+        IF VALID-OBJECT(components) THEN DO:
+            CAST(components, System.IDisposable):Dispose().
+        END.
+ 
+    END DESTRUCTOR.
+ 
+END CLASS.
+ 

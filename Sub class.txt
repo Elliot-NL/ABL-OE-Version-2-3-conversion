@@ -1,0 +1,805 @@
+/*------------------------------------------------------------------------
+    File        : ftLocation                                   
+    Purpose     : 
+    Syntax      :
+    Description : 
+    Author(s)   : ENL
+    Created     : 8th May 2017
+    Notes       : Adapted from ## v-cal.w ##
+  ----------------------------------------------------------------------*/
+ 
+USING Progress.Lang.*.
+USING Progress.Windows.Form.
+ 
+ROUTINE-LEVEL ON ERROR UNDO, THROW.
+ 
+CLASS ftLocation INHERITS IChildTabForm IMPLEMENTS IEventHandler:
+ 
+    DEFINE PRIVATE VARIABLE btnQuestion AS mfButton NO-UNDO.
+    DEFINE PRIVATE VARIABLE components              AS System.ComponentModel.IContainer NO-UNDO.
+    DEFINE PRIVATE VARIABLE gbLocation              AS mfGroupBox                       NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbAgent AS mfLabel NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbClearanceVia AS mfLabel NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbCountry AS mfLabel NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbCustomsCode AS mfLabel NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbDescription           AS mfLabel                          NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbNotes AS mfLabel NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbScheduleDK AS mfLabel NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbGateWay AS mfLookupLabel NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbTradeArea AS mfLookupLabel NO-UNDO.
+    DEFINE PRIVATE VARIABLE lbLocation AS mfLabel NO-UNDO.
+   
+    DEFINE PRIVATE VARIABLE mfClearanceVia AS mfLookupCombo NO-UNDO.
+    DEFINE PRIVATE VARIABLE teAgent AS mfTextEditor NO-UNDO.
+    DEFINE PRIVATE VARIABLE teCountry AS mfTextEditor NO-UNDO.
+    DEFINE PRIVATE VARIABLE teGateway AS mfLookupTextEditor NO-UNDO.
+    DEFINE PRIVATE VARIABLE teCustomsCode AS mfTextEditor NO-UNDO.
+    DEFINE PRIVATE VARIABLE teLocationCode AS mfTextEditor NO-UNDO.
+    DEFINE PRIVATE VARIABLE teDescription           AS mfTextEditor                     NO-UNDO.
+   
+    DEFINE PRIVATE VARIABLE mfUpdatePanel1          AS mfUpdatePanel                    NO-UNDO.
+    DEFINE PRIVATE VARIABLE oBindingSource          AS Progress.Data.BindingSource      NO-UNDO.
+    DEFINE PRIVATE VARIABLE oParentForm             AS IParentTabForm                   NO-UNDO.
+    DEFINE PRIVATE VARIABLE oFormLayout             AS FormLayout                       NO-UNDO.
+    DEFINE PRIVATE VARIABLE oLocationTable          AS LocationTable                    NO-UNDO.
+   
+    DEFINE PRIVATE VARIABLE lDisableTab             AS LOGICAL                          NO-UNDO.
+    DEFINE PRIVATE VARIABLE iCount                  AS INTEGER                          NO-UNDO.
+    DEFINE PRIVATE VARIABLE lUpdateMode             AS LOGICAL                          NO-UNDO.
+    DEFINE PRIVATE VARIABLE cOriginal               AS CHARACTER                        NO-UNDO.
+    DEFINE PRIVATE VARIABLE cModuleEntry            AS CHARACTER                        NO-UNDO.
+    DEFINE PRIVATE VARIABLE cModuleValid            AS CHARACTER                        NO-UNDO.
+    DEFINE PRIVATE VARIABLE cModuleText             AS CHARACTER                        NO-UNDO.
+    DEFINE PRIVATE VARIABLE lReturn                 AS LOGICAL                          NO-UNDO.
+    DEFINE PRIVATE VARIABLE teNotes AS mfTextEditor NO-UNDO.
+    DEFINE PRIVATE VARIABLE teSchedule AS mfTextEditor NO-UNDO.
+    DEFINE PRIVATE VARIABLE teTradeArea AS mfLookupTextEditor NO-UNDO.
+ 
+    CONSTRUCTOR PUBLIC ftLocation( INPUT ipBindingSource AS Progress.Data.BindingSource,
+                                   INPUT ipParentForm    AS IParentTabForm,
+                                   INPUT ipGridName      AS CHARACTER ):
+        SUPER().
+        InitializeComponent().
+ 
+        /* Create class objects, set properties, etc. */
+        ASSIGN oBindingSource                = ipBindingSource
+               mfUpdatePanel1:BindingSource  = ipBindingSource
+               mfUpdatePanel1:GridName       = ipGridName
+               oParentForm                   = ipParentForm
+               oLocationTable                = NEW LocationTable().
+ 
+        /* Set form layout */
+        /* NOTE: must be after setting binding source's handle as it's required by grid */
+        oFormLayout = NEW FormLayout().
+        oFormLayout:SetLayout(INPUT CAST(THIS-OBJECT, Progress.Windows.Form), THIS-OBJECT:Controls).
+        DELETE OBJECT oFormLayout.
+ 
+        /*Set binding source for controls*/
+ 
+        teLocationCode:DataBindings:Add("Text", ipBindingSource, "location-code", TRUE).
+        teDescription:DataBindings:Add("Text", ipBindingSource, "description", TRUE).
+        teCountry:DataBindings:Add("Text", ipBindingSource, "country-code", TRUE).
+        teTradeArea:DataBindings:Add("Text", ipBindingSource, "trade-area", TRUE).
+        teGateway:DataBindings:Add("Text", ipBindingSource, "gateway-code", TRUE).
+        teSchedule:DataBindings:Add("Text", ipBindingSource, "scheduleD", TRUE).
+        mfClearanceVia:SetBindingSource(ipBindingSource, "clearance-via").
+        teCustomsCode:DataBindings:Add("Text", ipBindingSource, "edi-code[1]", TRUE).
+        teAgent:DataBindings:Add("Text", ipBindingSource, "agent", TRUE).
+        teNotes:DataBindings:Add("Text", ipBindingSource, "notes", TRUE).
+ 
+ 
+        CATCH e AS Progress.Lang.Error:
+            IF e:NumMessages > 0 THEN
+            DO iCount = 1 TO e:NumMessages:
+                MESSAGE e:GetMessage(1)
+                    VIEW-AS ALERT-BOX ERROR TITLE THIS-OBJECT:Name + " error (Constructor)".
+            END.
+            UNDO, THROW e.
+        END CATCH.
+ 
+    END CONSTRUCTOR.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: After applying column filters to a grid, we must customise controls
+                     like update panels, button groupboxes, etc. depending on whether
+                     grid has any rows left
+            Notes:
+                INPUT
+                1. ipNumResults = number of results in binding source or query
+    ------------------------------------------------------------------------------*/
+    METHOD PUBLIC VOID AfterFilteredGrid ( INPUT ipNumResults AS INTEGER ):
+        /* If main grid has no results, initialise panel's buttons so they're correctly enabled */
+        mfUpdatePanel1:InitializeButtons(ipNumResults).
+    END METHOD.
+ 
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Disable or enable controls for update or non-update mode
+            Notes: DON'T delete as it's used by parent form to customise its tabs
+ 
+                   1. ipUpdateMode = YES for Update, New or Copy buttons on mfUpdatePanel
+                                     NO  for Save, Delete or Cancel buttons on mfUpdatePanel
+                   2. ipTabbedForm = name of form whose mfUpdatePanel was pressed
+                   3. ipButton     = name of button that was pressed, i.e.
+                                     CANCEL, COPY, DELETE, NEW, SAVE or UPDATE
+ 
+                   If your form has more than an update panel, groupbox of data
+                   controls and an optional secondary grid, you may need to add code
+                   after EnableControls or replace the call of EnableControls
+                   to handle your set of controls
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE VOID ChangeUpdateMode ( INPUT ipUpdateMode AS LOGICAL,
+                                            INPUT ipTabbedForm AS CHARACTER,
+                                            INPUT ipButton     AS CHARACTER ):
+        /* lUpdateMode is YES only if we're updating this form */
+        lUpdateMode = (ipUpdateMode AND ipTabbedForm = THIS-OBJECT:GetType():ToString()).
+ 
+        /* Pass form's controls collection to recursive method */
+        THIS-OBJECT:EnableControls(THIS-OBJECT:Controls, lUpdateMode, ipButton, mfUpdatePanel1:GridName, ipTabbedForm, lDisableTab).
+ 
+        /* Check initial field values for new records only */
+        IF lUpdateMode AND ipButton = "NEW" THEN
+            Statics:CheckInitialValues(THIS-OBJECT:Controls, THIS-OBJECT:GetType():ToString(), "").
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Disable tab, determined by parent form plus logical flag
+            Notes: DON'T DELETE as it's used by parent form to customise its tabs
+                   to prevent updates according to user's permissions
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE VOID DisableTab ( ):
+        /* Set flag */
+        lDisableTab = YES.
+ 
+        /* Call internal method to enable or disable controls */
+        THIS-OBJECT:DisableUpdateControls(YES).
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Disable tab, determined by parent form plus logical flag
+            Notes: only used to override standard tab customisation,
+                   e.g. fpJob.cls and enable or disable depending on job's status
+                INPUT
+                1. ipDisable = YES to disable controls, NO to allow updates
+    ------------------------------------------------------------------------------*/
+    METHOD OVERRIDE VOID DisableTab ( INPUT ipDisable AS LOGICAL ):
+        /* Set flag */
+        lDisableTab = ipDisable.
+ 
+        /* Call internal method to enable or disable controls */
+        THIS-OBJECT:DisableUpdateControls(ipDisable).
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Disable or enable all controls that can update data, e.g. update panel
+                     plus handle other controls that can view data so they don't allow updates
+            Notes:
+                INPUT
+                1. ipDisable = YES to disable controls, NO to allow updates
+    ------------------------------------------------------------------------------*/
+    METHOD PRIVATE VOID DisableUpdateControls ( INPUT ipDisable AS LOGICAL ):
+ 
+        ASSIGN mfUpdatePanel1:Enabled = NOT ipDisable.
+ 
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Action to take when a button was pressed on the update panel
+            Notes: method definition required by interface IEventHandler.cls
+    ------------------------------------------------------------------------------*/
+    METHOD PUBLIC VOID EventHandlerUpdatePanel( INPUT sender AS System.Object, INPUT e AS System.EventArgs ):
+        DEFINE VARIABLE cLastPressed AS CHARACTER NO-UNDO. /* Local definition as this form has no EventHandler method */
+ 
+        IF TYPE-OF (e, EnhancedEventArgs) THEN
+        DO:
+            /* Remember current button */
+            cLastPressed = CAST(e, EnhancedEventArgs):UpdateButton.
+ 
+            /* This form has no EventHandler method so no need to clear changes in dataset made by EventHandler() with ACCEPT-CHANGES() */
+            IF CAN-DO("CANCEL,SAVE", cLastPressed) THEN
+            DO:
+                /* After ending update mode, clear changes in dataset made by EventHandler()  */
+                /* method to 'chdataset' field else we get multiple records in change dataset */
+                /* NOTE: normally wouldn't need for deletion but that may depend on your data */
+                oBindingSource:HANDLE:ACCEPT-CHANGES().
+                oBindingSource:Refresh().
+ 
+                /* After saving, tell main grid form to refresh its current row */
+                /* IMPORTANT: RefreshGridRow must always be called if parent form has that method */
+                /* e.g. to populate non-db fields, after mfAddrEntryBtns have saved their data    */
+                IF cLastPressed = "SAVE" THEN
+                    oParentForm:RefreshGridRow().
+            END.
+        END.
+    END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose:
+            Notes: method definition required by interface IEventHandler.cls
+    ------------------------------------------------------------------------------*/
+    METHOD PUBLIC VOID EventHandlerValueChanged( INPUT sender AS System.Object, INPUT e AS System.EventArgs ):
+       
+    END METHOD.
+ 
+                /*------------------------------------------------------------------------------
+                                                Purpose:                                                                                                                                                                                                                                                                                
+                                                Notes:                                                                                                                                                                                                                                                                     
+                ------------------------------------------------------------------------------*/
+                @VisualDesigner.
+                METHOD PRIVATE VOID gbLocation_Click( INPUT sender AS System.Object, INPUT e AS System.EventArgs ):
+                               
+                                RETURN.
+ 
+                END METHOD.
+ 
+    METHOD PRIVATE VOID InitializeComponent(  ):
+                               
+     
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance15 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance15 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance4 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance4 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance12 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance12 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance13 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance13 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance10 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance10 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance8 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance8 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance9 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance9 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance24 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance24 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance14 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance14 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance23 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance23 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance32 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance32 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance3 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance3 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance17 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance17 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance18 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance18 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance19 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance19 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+       DEFINE VARIABLE appearance20 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance20 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance11 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance11 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance2 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance2 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance6 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance6 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance7 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance7 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance1 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance1 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE appearance5 AS Infragistics.Win.Appearance NO-UNDO.
+        appearance5 = NEW Infragistics.Win.Appearance().
+        @VisualDesigner.FormMember (NeedsInitialize="true").
+        DEFINE VARIABLE resources AS Progress.Util.ResourceManager NO-UNDO.
+        resources = NEW Progress.Util.ResourceManager("ftLocation").
+        THIS-OBJECT:mfUpdatePanel1 = NEW mfUpdatePanel().
+        THIS-OBJECT:gbLocation = NEW mfGroupBox().
+        THIS-OBJECT:teGateway = NEW mfLookupTextEditor().
+        THIS-OBJECT:lbGateWay = NEW mfLookupLabel().
+        THIS-OBJECT:teTradeArea = NEW mfLookupTextEditor().
+        THIS-OBJECT:lbTradeArea = NEW mfLookupLabel().
+        THIS-OBJECT:mfClearanceVia = NEW mfLookupCombo().
+        THIS-OBJECT:teAgent = NEW mfTextEditor().
+        THIS-OBJECT:teCustomsCode = NEW mfTextEditor().
+        THIS-OBJECT:teSchedule = NEW mfTextEditor().
+        THIS-OBJECT:teNotes = NEW mfTextEditor().
+        THIS-OBJECT:btnQuestion = NEW mfButton().
+        THIS-OBJECT:lbCustomsCode = NEW mfLabel().
+        THIS-OBJECT:lbAgent = NEW mfLabel().
+        THIS-OBJECT:lbClearanceVia = NEW mfLabel().
+        THIS-OBJECT:lbScheduleDK = NEW mfLabel().
+        THIS-OBJECT:lbNotes = NEW mfLabel().
+        THIS-OBJECT:teCountry = NEW mfTextEditor().
+        THIS-OBJECT:lbCountry = NEW mfLabel().
+        THIS-OBJECT:teDescription = NEW mfTextEditor().
+        THIS-OBJECT:teLocationCode = NEW mfTextEditor().
+        THIS-OBJECT:lbLocation = NEW mfLabel().
+        THIS-OBJECT:lbDescription = NEW mfLabel().
+        CAST(THIS-OBJECT:gbLocation, System.ComponentModel.ISupportInitialize):BeginInit().
+        THIS-OBJECT:gbLocation:SuspendLayout().
+        CAST(THIS-OBJECT:teGateway, System.ComponentModel.ISupportInitialize):BeginInit().
+        CAST(THIS-OBJECT:teTradeArea, System.ComponentModel.ISupportInitialize):BeginInit().
+        CAST(THIS-OBJECT:teAgent, System.ComponentModel.ISupportInitialize):BeginInit().
+        CAST(THIS-OBJECT:teCustomsCode, System.ComponentModel.ISupportInitialize):BeginInit().
+        CAST(THIS-OBJECT:teSchedule, System.ComponentModel.ISupportInitialize):BeginInit().
+        CAST(THIS-OBJECT:teNotes, System.ComponentModel.ISupportInitialize):BeginInit().
+        CAST(THIS-OBJECT:teCountry, System.ComponentModel.ISupportInitialize):BeginInit().
+        CAST(THIS-OBJECT:teDescription, System.ComponentModel.ISupportInitialize):BeginInit().
+        CAST(THIS-OBJECT:teLocationCode, System.ComponentModel.ISupportInitialize):BeginInit().
+        THIS-OBJECT:SuspendLayout().
+        /*  */
+        /* mfUpdatePanel1 */
+        /*  */
+        DEFINE VARIABLE nestedvar0 AS System.Windows.Forms.AnchorStyles NO-UNDO.
+        nestedvar0 = System.Windows.Forms.AnchorStyles:Top.
+        THIS-OBJECT:mfUpdatePanel1:Anchor = CAST(Progress.Util.EnumHelper:Or(nestedvar0, System.Windows.Forms.AnchorStyles:Right), System.Windows.Forms.AnchorStyles).
+        THIS-OBJECT:mfUpdatePanel1:BindingSource = ?.
+        THIS-OBJECT:mfUpdatePanel1:ConfirmDeletion = FALSE.
+        THIS-OBJECT:mfUpdatePanel1:EnabledCancel = FALSE.
+        THIS-OBJECT:mfUpdatePanel1:EnabledCopy = TRUE.
+        THIS-OBJECT:mfUpdatePanel1:EnabledDelete = TRUE.
+        THIS-OBJECT:mfUpdatePanel1:EnabledNew = TRUE.
+        THIS-OBJECT:mfUpdatePanel1:EnabledPanel = TRUE.
+        THIS-OBJECT:mfUpdatePanel1:EnabledSave = FALSE.
+        THIS-OBJECT:mfUpdatePanel1:EnabledUpdate = TRUE.
+        THIS-OBJECT:mfUpdatePanel1:GroupBoxName = "gbLocation".
+        THIS-OBJECT:mfUpdatePanel1:Location = NEW System.Drawing.Point(575, 0).
+        THIS-OBJECT:mfUpdatePanel1:Name = "mfUpdatePanel1".
+        THIS-OBJECT:mfUpdatePanel1:ProgramName = "sLocationSaveChanges.p".
+        THIS-OBJECT:mfUpdatePanel1:ProgressBarOneTime = TRUE.
+        THIS-OBJECT:mfUpdatePanel1:ProgressBarShow = FALSE.
+        THIS-OBJECT:mfUpdatePanel1:Size = NEW System.Drawing.Size(88, 209).
+        THIS-OBJECT:mfUpdatePanel1:TabIndex = 12.
+        THIS-OBJECT:mfUpdatePanel1:UserDeleteValidation = FALSE.
+        THIS-OBJECT:mfUpdatePanel1:UserInputValidation = TRUE.
+        /*  */
+        /* gbLocation */
+        /*  */
+        DEFINE VARIABLE nestedvar1 AS System.Windows.Forms.AnchorStyles NO-UNDO.
+        nestedvar1 = CAST(Progress.Util.EnumHelper:Or(CAST(Progress.Util.EnumHelper:Or(System.Windows.Forms.AnchorStyles:Top, System.Windows.Forms.AnchorStyles:Bottom), System.Windows.Forms.AnchorStyles), System.Windows.Forms.AnchorStyles:Left), System.Windows.Forms.AnchorStyles).
+        THIS-OBJECT:gbLocation:Anchor = CAST(Progress.Util.EnumHelper:Or(nestedvar1, System.Windows.Forms.AnchorStyles:Right), System.Windows.Forms.AnchorStyles).
+        appearance15:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:gbLocation:Appearance = appearance15.
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teGateway).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbGateWay).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teTradeArea).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbTradeArea).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:mfClearanceVia).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teAgent).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teCustomsCode).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teSchedule).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teNotes).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:btnQuestion).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbCustomsCode).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbAgent).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbClearanceVia).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbScheduleDK).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbNotes).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teCountry).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbCountry).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teDescription).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:teLocationCode).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbLocation).
+        THIS-OBJECT:gbLocation:Controls:Add(THIS-OBJECT:lbDescription).
+        THIS-OBJECT:gbLocation:Location = NEW System.Drawing.Point(0, 0).
+        THIS-OBJECT:gbLocation:Name = "gbLocation".
+        THIS-OBJECT:gbLocation:Size = NEW System.Drawing.Size(569, 379).
+        THIS-OBJECT:gbLocation:TabIndex = 0.
+        THIS-OBJECT:gbLocation:Click:Subscribe(THIS-OBJECT:gbLocation_Click).
+        /*  */
+        /* teGateway */
+        /*  */
+        THIS-OBJECT:teGateway:AllowInvalidValue = FALSE.
+        THIS-OBJECT:teGateway:AlwaysDisabled = FALSE.
+        appearance4:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teGateway:Appearance = appearance4.
+        THIS-OBJECT:teGateway:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teGateway:Enabled = FALSE.
+        THIS-OBJECT:teGateway:Location = NEW System.Drawing.Point(161, 125).
+        THIS-OBJECT:teGateway:MultipleNoWildcard = FALSE.
+        THIS-OBJECT:teGateway:MultipleSelection = FALSE.
+        THIS-OBJECT:teGateway:Name = "teGateway".
+        THIS-OBJECT:teGateway:ShowNotes = TRUE.
+        THIS-OBJECT:teGateway:Size = NEW System.Drawing.Size(44, 21).
+        THIS-OBJECT:teGateway:TabIndex = 18.
+        THIS-OBJECT:teGateway:UseDefaultCompany = FALSE.
+        /*  */
+        /* lbGateWay */
+        /*  */
+        appearance12:FontData:UnderlineAsString = "True".
+        appearance12:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbGateWay:Appearance = appearance12.
+        THIS-OBJECT:lbGateWay:AutoSize = TRUE.
+        THIS-OBJECT:lbGateWay:Enabled = FALSE.
+        appearance13:Cursor = System.Windows.Forms.Cursors:Hand.
+        THIS-OBJECT:lbGateWay:HotTrackAppearance = appearance13.
+        THIS-OBJECT:lbGateWay:Location = NEW System.Drawing.Point(15, 128).
+        THIS-OBJECT:lbGateWay:MultipleNoWildcard = FALSE.
+        THIS-OBJECT:lbGateWay:MultipleSelection = FALSE.
+        THIS-OBJECT:lbGateWay:Name = "lbGateWay".
+        THIS-OBJECT:lbGateWay:ShowNotes = TRUE.
+        THIS-OBJECT:lbGateWay:Size = NEW System.Drawing.Size(49, 14).
+        THIS-OBJECT:lbGateWay:TabIndex = 17.
+        THIS-OBJECT:lbGateWay:Tag = "".
+        THIS-OBJECT:lbGateWay:Text = "Gateway".
+        THIS-OBJECT:lbGateWay:UseDefaultCompany = FALSE.
+        THIS-OBJECT:lbGateWay:UseHotTracking = Infragistics.Win.DefaultableBoolean:True.
+        /*  */
+        /* teTradeArea */
+        /*  */
+        THIS-OBJECT:teTradeArea:AllowInvalidValue = FALSE.
+        THIS-OBJECT:teTradeArea:AlwaysDisabled = FALSE.
+        appearance10:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teTradeArea:Appearance = appearance10.
+        THIS-OBJECT:teTradeArea:DataName = "TradeArea".
+        THIS-OBJECT:teTradeArea:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teTradeArea:Enabled = FALSE.
+        THIS-OBJECT:teTradeArea:Location = NEW System.Drawing.Point(161, 98).
+        THIS-OBJECT:teTradeArea:MultipleNoWildcard = FALSE.
+        THIS-OBJECT:teTradeArea:MultipleSelection = FALSE.
+        THIS-OBJECT:teTradeArea:Name = "teTradeArea".
+        THIS-OBJECT:teTradeArea:ShowNotes = TRUE.
+        THIS-OBJECT:teTradeArea:Size = NEW System.Drawing.Size(44, 21).
+        THIS-OBJECT:teTradeArea:TabIndex = 4.
+        THIS-OBJECT:teTradeArea:UseDefaultCompany = FALSE.
+        /*  */
+        /* lbTradeArea */
+        /*  */
+        appearance8:FontData:UnderlineAsString = "True".
+        appearance8:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbTradeArea:Appearance = appearance8.
+        THIS-OBJECT:lbTradeArea:AutoSize = TRUE.
+        THIS-OBJECT:lbTradeArea:DataName = "TradeArea".
+        THIS-OBJECT:lbTradeArea:Enabled = FALSE.
+        appearance9:Cursor = System.Windows.Forms.Cursors:Hand.
+        THIS-OBJECT:lbTradeArea:HotTrackAppearance = appearance9.
+        THIS-OBJECT:lbTradeArea:Location = NEW System.Drawing.Point(14, 103).
+        THIS-OBJECT:lbTradeArea:MultipleNoWildcard = FALSE.
+        THIS-OBJECT:lbTradeArea:MultipleSelection = FALSE.
+        THIS-OBJECT:lbTradeArea:Name = "lbTradeArea".
+        THIS-OBJECT:lbTradeArea:ShowNotes = TRUE.
+        THIS-OBJECT:lbTradeArea:Size = NEW System.Drawing.Size(58, 14).
+        THIS-OBJECT:lbTradeArea:TabIndex = 15.
+        THIS-OBJECT:lbTradeArea:Tag = "".
+        THIS-OBJECT:lbTradeArea:Text = "TradeArea".
+        THIS-OBJECT:lbTradeArea:UseDefaultCompany = FALSE.
+        THIS-OBJECT:lbTradeArea:UseHotTracking = Infragistics.Win.DefaultableBoolean:True.
+        /*  */
+        /* mfClearanceVia */
+        /*  */
+        THIS-OBJECT:mfClearanceVia:AlwaysDisabled = FALSE.
+        THIS-OBJECT:mfClearanceVia:DataName = "ClearanceVia".
+        THIS-OBJECT:mfClearanceVia:Enabled = FALSE.
+        THIS-OBJECT:mfClearanceVia:Location = NEW System.Drawing.Point(161, 180).
+        THIS-OBJECT:mfClearanceVia:Name = "mfClearanceVia".
+        THIS-OBJECT:mfClearanceVia:NoBlankItem = FALSE.
+        THIS-OBJECT:mfClearanceVia:Size = NEW System.Drawing.Size(150, 21).
+        THIS-OBJECT:mfClearanceVia:TabIndex = 8.
+        /*  */
+        /* teAgent */
+        /*  */
+        THIS-OBJECT:teAgent:AlwaysDisabled = FALSE.
+        appearance24:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teAgent:Appearance = appearance24.
+        THIS-OBJECT:teAgent:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teAgent:Enabled = FALSE.
+        THIS-OBJECT:teAgent:Location = NEW System.Drawing.Point(161, 234).
+        THIS-OBJECT:teAgent:MaxLength = 7.
+        THIS-OBJECT:teAgent:Name = "teAgent".
+        THIS-OBJECT:teAgent:Size = NEW System.Drawing.Size(116, 21).
+        THIS-OBJECT:teAgent:TabIndex = 10.
+        /*  */
+        /* teCustomsCode */
+        /*  */
+        THIS-OBJECT:teCustomsCode:AlwaysDisabled = FALSE.
+        appearance14:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teCustomsCode:Appearance = appearance14.
+        THIS-OBJECT:teCustomsCode:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teCustomsCode:Enabled = FALSE.
+        THIS-OBJECT:teCustomsCode:Location = NEW System.Drawing.Point(161, 207).
+        THIS-OBJECT:teCustomsCode:MaxLength = 10.
+        THIS-OBJECT:teCustomsCode:Name = "teCustomsCode".
+        THIS-OBJECT:teCustomsCode:Size = NEW System.Drawing.Size(116, 21).
+        THIS-OBJECT:teCustomsCode:TabIndex = 9.
+        THIS-OBJECT:teCustomsCode:ValueChanged:Subscribe(THIS-OBJECT:teCustomsCode_ValueChanged).
+        /*  */
+        /* teSchedule */
+        /*  */
+        THIS-OBJECT:teSchedule:AcceptsReturn = TRUE.
+        THIS-OBJECT:teSchedule:AlwaysDisabled = FALSE.
+        appearance23:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teSchedule:Appearance = appearance23.
+        THIS-OBJECT:teSchedule:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teSchedule:Enabled = FALSE.
+        THIS-OBJECT:teSchedule:Location = NEW System.Drawing.Point(161, 151).
+        THIS-OBJECT:teSchedule:MaxLength = 6.
+        THIS-OBJECT:teSchedule:Name = "teSchedule".
+        THIS-OBJECT:teSchedule:Size = NEW System.Drawing.Size(116, 21).
+        THIS-OBJECT:teSchedule:TabIndex = 6.
+        /*  */
+        /* teNotes */
+        /*  */
+        THIS-OBJECT:teNotes:AcceptsReturn = TRUE.
+        THIS-OBJECT:teNotes:AlwaysDisabled = FALSE.
+        appearance32:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teNotes:Appearance = appearance32.
+        THIS-OBJECT:teNotes:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teNotes:Enabled = FALSE.
+        THIS-OBJECT:teNotes:Location = NEW System.Drawing.Point(161, 261).
+        THIS-OBJECT:teNotes:MaxLength = 500.
+        THIS-OBJECT:teNotes:Multiline = TRUE.
+        THIS-OBJECT:teNotes:Name = "teNotes".
+        THIS-OBJECT:teNotes:Scrollbars = System.Windows.Forms.ScrollBars:Vertical.
+        THIS-OBJECT:teNotes:Size = NEW System.Drawing.Size(362, 102).
+        THIS-OBJECT:teNotes:TabIndex = 11.
+        /*  */
+        /* btnQuestion */
+        /*  */
+        THIS-OBJECT:btnQuestion:AlwaysEnabled = FALSE.
+        THIS-OBJECT:btnQuestion:ButtonStyle = Infragistics.Win.UIElementButtonStyle:WindowsVistaButton.
+        THIS-OBJECT:btnQuestion:Location = NEW System.Drawing.Point(284, 151).
+        THIS-OBJECT:btnQuestion:Name = "btnQuestion".
+        THIS-OBJECT:btnQuestion:Size = NEW System.Drawing.Size(27, 23).
+        THIS-OBJECT:btnQuestion:TabIndex = 7.
+        THIS-OBJECT:btnQuestion:Text = "?".
+        /*  */
+        /* lbCustomsCode */
+        /*  */
+        appearance3:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbCustomsCode:Appearance = appearance3.
+        THIS-OBJECT:lbCustomsCode:AutoSize = TRUE.
+        THIS-OBJECT:lbCustomsCode:Location = NEW System.Drawing.Point(15, 214).
+        THIS-OBJECT:lbCustomsCode:Name = "lbCustomsCode".
+        THIS-OBJECT:lbCustomsCode:Size = NEW System.Drawing.Size(79, 14).
+        THIS-OBJECT:lbCustomsCode:TabIndex = 14.
+        THIS-OBJECT:lbCustomsCode:Text = "Customs Code".
+        /*  */
+        /* lbAgent */
+        /*  */
+        appearance17:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbAgent:Appearance = appearance17.
+        THIS-OBJECT:lbAgent:AutoSize = TRUE.
+        THIS-OBJECT:lbAgent:Location = NEW System.Drawing.Point(15, 241).
+        THIS-OBJECT:lbAgent:Name = "lbAgent".
+        THIS-OBJECT:lbAgent:Size = NEW System.Drawing.Size(34, 14).
+        THIS-OBJECT:lbAgent:TabIndex = 13.
+        THIS-OBJECT:lbAgent:Text = "Agent".
+        /*  */
+        /* lbClearanceVia */
+        /*  */
+        appearance18:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbClearanceVia:Appearance = appearance18.
+        THIS-OBJECT:lbClearanceVia:AutoSize = TRUE.
+        THIS-OBJECT:lbClearanceVia:Location = NEW System.Drawing.Point(15, 180).
+        THIS-OBJECT:lbClearanceVia:Name = "lbClearanceVia".
+        THIS-OBJECT:lbClearanceVia:Size = NEW System.Drawing.Size(75, 14).
+        THIS-OBJECT:lbClearanceVia:TabIndex = 12.
+        THIS-OBJECT:lbClearanceVia:Text = "Clearance Via".
+        /*  */
+        /* lbScheduleDK */
+        /*  */
+        appearance19:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbScheduleDK:Appearance = appearance19.
+        THIS-OBJECT:lbScheduleDK:AutoSize = TRUE.
+        THIS-OBJECT:lbScheduleDK:Location = NEW System.Drawing.Point(15, 156).
+        THIS-OBJECT:lbScheduleDK:Name = "lbScheduleDK".
+        THIS-OBJECT:lbScheduleDK:Size = NEW System.Drawing.Size(73, 14).
+        THIS-OBJECT:lbScheduleDK:TabIndex = 11.
+        THIS-OBJECT:lbScheduleDK:Text = "Schedule D/K".
+        /*  */
+        /* lbNotes */
+        /*  */
+        appearance20:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbNotes:Appearance = appearance20.
+        THIS-OBJECT:lbNotes:AutoSize = TRUE.
+        THIS-OBJECT:lbNotes:Location = NEW System.Drawing.Point(14, 263).
+        THIS-OBJECT:lbNotes:Name = "lbNotes".
+        THIS-OBJECT:lbNotes:Size = NEW System.Drawing.Size(34, 14).
+        THIS-OBJECT:lbNotes:TabIndex = 10.
+        THIS-OBJECT:lbNotes:Text = "Notes".
+        /*  */
+        /* teCountry */
+        /*  */
+        THIS-OBJECT:teCountry:AllowDrop = TRUE.
+        THIS-OBJECT:teCountry:AlwaysDisabled = FALSE.
+        appearance11:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teCountry:Appearance = appearance11.
+        THIS-OBJECT:teCountry:CharacterCasing = System.Windows.Forms.CharacterCasing:Upper.
+        THIS-OBJECT:teCountry:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teCountry:Enabled = FALSE.
+        THIS-OBJECT:teCountry:Location = NEW System.Drawing.Point(161, 70).
+        THIS-OBJECT:teCountry:MaxLength = 2.
+        THIS-OBJECT:teCountry:Name = "teCountry".
+        THIS-OBJECT:teCountry:Size = NEW System.Drawing.Size(44, 21).
+        THIS-OBJECT:teCountry:TabIndex = 3.
+        THIS-OBJECT:teCountry:Tag = "module".
+        THIS-OBJECT:teCountry:Leave:Subscribe(THIS-OBJECT:teModule_Leave).
+        THIS-OBJECT:teCountry:Enter:Subscribe(THIS-OBJECT:teModule_Enter).
+        /*  */
+        /* lbCountry */
+        /*  */
+        appearance2:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbCountry:Appearance = appearance2.
+        THIS-OBJECT:lbCountry:AutoSize = TRUE.
+        THIS-OBJECT:lbCountry:Location = NEW System.Drawing.Point(14, 74).
+        THIS-OBJECT:lbCountry:Name = "lbCountry".
+        THIS-OBJECT:lbCountry:Size = NEW System.Drawing.Size(44, 14).
+        THIS-OBJECT:lbCountry:TabIndex = 3.
+        THIS-OBJECT:lbCountry:Text = "Country".
+        /*  */
+        /* teDescription */
+        /*  */
+        THIS-OBJECT:teDescription:AlwaysDisabled = FALSE.
+        appearance6:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teDescription:Appearance = appearance6.
+        THIS-OBJECT:teDescription:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teDescription:Enabled = FALSE.
+        THIS-OBJECT:teDescription:Location = NEW System.Drawing.Point(161, 44).
+        THIS-OBJECT:teDescription:MaxLength = 30.
+        THIS-OBJECT:teDescription:Name = "teDescription".
+        THIS-OBJECT:teDescription:Size = NEW System.Drawing.Size(256, 21).
+        THIS-OBJECT:teDescription:TabIndex = 2.
+        THIS-OBJECT:teDescription:Tag = "Description".
+        /*  */
+        /* teLocationCode */
+        /*  */
+        THIS-OBJECT:teLocationCode:AllowDrop = TRUE.
+        THIS-OBJECT:teLocationCode:AlwaysDisabled = FALSE.
+        appearance7:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:teLocationCode:Appearance = appearance7.
+        THIS-OBJECT:teLocationCode:CharacterCasing = System.Windows.Forms.CharacterCasing:Upper.
+        THIS-OBJECT:teLocationCode:DisplayStyle = Infragistics.Win.EmbeddableElementDisplayStyle:WindowsVista.
+        THIS-OBJECT:teLocationCode:Enabled = FALSE.
+        THIS-OBJECT:teLocationCode:Location = NEW System.Drawing.Point(161, 17).
+        THIS-OBJECT:teLocationCode:MaxLength = 5.
+        THIS-OBJECT:teLocationCode:Name = "teLocationCode".
+        THIS-OBJECT:teLocationCode:Size = NEW System.Drawing.Size(53, 21).
+        THIS-OBJECT:teLocationCode:TabIndex = 1.
+        THIS-OBJECT:teLocationCode:Tag = "CalcCode".
+        /*  */
+        /* lbLocation */
+        /*  */
+        appearance1:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbLocation:Appearance = appearance1.
+        THIS-OBJECT:lbLocation:AutoSize = TRUE.
+        THIS-OBJECT:lbLocation:Location = NEW System.Drawing.Point(9, 21).
+        THIS-OBJECT:lbLocation:Name = "lbLocation".
+        THIS-OBJECT:lbLocation:Size = NEW System.Drawing.Size(47, 14).
+        THIS-OBJECT:lbLocation:TabIndex = 0.
+        THIS-OBJECT:lbLocation:Text = "Location".
+        /*  */
+        /* lbDescription */
+        /*  */
+        appearance5:ForeColorDisabled = System.Drawing.SystemColors:ControlText.
+        THIS-OBJECT:lbDescription:Appearance = appearance5.
+        THIS-OBJECT:lbDescription:AutoSize = TRUE.
+        THIS-OBJECT:lbDescription:Location = NEW System.Drawing.Point(12, 48).
+        THIS-OBJECT:lbDescription:Name = "lbDescription".
+        THIS-OBJECT:lbDescription:Size = NEW System.Drawing.Size(61, 14).
+       THIS-OBJECT:lbDescription:TabIndex = 2.
+        THIS-OBJECT:lbDescription:Text = "Description".
+        /*  */
+        /* ftLocation */
+        /*  */
+        THIS-OBJECT:AutoScroll = TRUE.
+        THIS-OBJECT:ClientSize = NEW System.Drawing.Size(665, 382).
+        THIS-OBJECT:Controls:Add(THIS-OBJECT:gbLocation).
+        THIS-OBJECT:Controls:Add(THIS-OBJECT:mfUpdatePanel1).
+        THIS-OBJECT:Icon = CAST(resources:GetObject("$this.Icon"), System.Drawing.Icon).
+        THIS-OBJECT:Name = "ftLocation".
+        THIS-OBJECT:Tag = "".
+        THIS-OBJECT:Text = "Locations".
+        CAST(THIS-OBJECT:gbLocation, System.ComponentModel.ISupportInitialize):EndInit().
+        THIS-OBJECT:gbLocation:ResumeLayout(FALSE).
+        THIS-OBJECT:gbLocation:PerformLayout().
+        CAST(THIS-OBJECT:teGateway, System.ComponentModel.ISupportInitialize):EndInit().
+        CAST(THIS-OBJECT:teTradeArea, System.ComponentModel.ISupportInitialize):EndInit().
+        CAST(THIS-OBJECT:teAgent, System.ComponentModel.ISupportInitialize):EndInit().
+        CAST(THIS-OBJECT:teCustomsCode, System.ComponentModel.ISupportInitialize):EndInit().
+        CAST(THIS-OBJECT:teSchedule, System.ComponentModel.ISupportInitialize):EndInit().
+        CAST(THIS-OBJECT:teNotes, System.ComponentModel.ISupportInitialize):EndInit().
+        CAST(THIS-OBJECT:teCountry, System.ComponentModel.ISupportInitialize):EndInit().
+        CAST(THIS-OBJECT:teDescription, System.ComponentModel.ISupportInitialize):EndInit().
+        CAST(THIS-OBJECT:teLocationCode, System.ComponentModel.ISupportInitialize):EndInit().
+        THIS-OBJECT:ResumeLayout(FALSE).
+        CATCH e AS Progress.Lang.Error:
+            UNDO, THROW e.
+        END CATCH.
+    END METHOD.
+ 
+                /*------------------------------------------------------------------------------
+                                                Purpose:                                                                                                                                                                                                                                                                                
+                                                Notes:                                                                                                                                                                                                                                                                     
+                ------------------------------------------------------------------------------*/
+                @VisualDesigner.
+                METHOD PRIVATE VOID teCustomsCode_ValueChanged( INPUT sender AS System.Object, INPUT e AS System.EventArgs ):
+                               
+                                RETURN.
+ 
+                END METHOD.
+ 
+                /*------------------------------------------------------------------------------
+                                                Purpose: Store value on entry to validate changes                                                                                                                                                                                                                                                                              
+                                                Notes:                                                                                                                                                                                                                                                                     
+                ------------------------------------------------------------------------------*/
+                @VisualDesigner.
+                METHOD PRIVATE VOID teModule_Enter( INPUT sender AS System.Object, INPUT e AS System.EventArgs ):
+                               
+                                ASSIGN cOriginal = teCountry:TEXT.
+                                RETURN.
+ 
+                END METHOD.
+ 
+                /*------------------------------------------------------------------------------
+                                                Purpose: Validate the module type                                                                                                                                                                                                                                                                             
+                                                Notes:                                                                                                                                                                                                                                                                     
+                ------------------------------------------------------------------------------*/
+                @VisualDesigner.
+                METHOD PRIVATE VOID teModule_Leave( INPUT sender AS System.Object, INPUT e AS System.EventArgs ):
+ 
+/*        /* Validate the module code(s) on leave of field */          */
+/*                           IF teModule:TEXT NE cOriginal THEN                                 */
+/*                           DO:                                                                */
+/*                               oLocationTable:ValidModule( INPUT  teModule:TEXT,              */
+/*                                                           INPUT  statics:cLanguage,          */
+/*                                                           OUTPUT cModuleValid,               */
+/*                                                           OUTPUT cModuleText,                */
+/*                                                           OUTPUT lReturn,                    */
+/*                                                           INPUT-OUTPUT DATASET dsSystemMsg ).*/
+/*                               /* Invalid module code, reset field and show error message */  */
+/*            IF NOT lReturn THEN                                      */
+/*            DO:                                                      */
+/*                ASSIGN teModule:TEXT = cModuleValid.                 */
+/*                teModule:FOCUS().                                    */
+/*                THIS-OBJECT:ShowSystemMsg().                         */
+/*            END.                                                                       */
+/*                           END.                                                               */
+/*                           RETURN.                                                            */
+ 
+                END METHOD.
+ 
+    /*------------------------------------------------------------------------------
+            Purpose: Save validation run via update panel that:
+                     a. Checks for mandatory fields
+                     b. Requires user input, e.g. dialog screens, confirmation messages, etc.
+            Notes:
+                OUTPUT
+                1. opResult
+                    NO  = failed validation, tells update panel not to continue with save
+                    YES = passed validation, update panel will continue with save
+    ------------------------------------------------------------------------------*/
+    METHOD PUBLIC VOID UserInputValidation ( OUTPUT opResult AS LOGICAL ):
+        DEFINE VARIABLE lReturn AS LOGICAL NO-UNDO.
+ 
+        /* Check mandatory fields */
+        lReturn = Statics:CheckMandatoryFields(THIS-OBJECT:Controls, THIS-OBJECT:GetType():ToString(), "").
+        IF NOT lReturn THEN
+            RETURN.
+ 
+        /* Finally it's passed validation! */
+        opResult = YES.
+    END METHOD.
+ 
+    DESTRUCTOR PUBLIC ftLocation ( ):
+ 
+        IF VALID-OBJECT(components) THEN
+        DO:
+            CAST(components, System.IDisposable):Dispose().
+        END.
+        IF VALID-OBJECT( oLocationTable ) THEN
+            DELETE OBJECT( oLocationTable ).
+    END DESTRUCTOR.
+ 
+END CLASS.
